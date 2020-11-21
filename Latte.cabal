@@ -1,0 +1,88 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 2b502e849a4d30c56ccaaf4ce67a20d259c4113d37531ecb74bd01190542c4c0
+
+name:           Latte
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/Latte#readme>
+homepage:       https://github.com/githubuser/Latte#readme
+bug-reports:    https://github.com/githubuser/Latte/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2020 Author name here
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/Latte
+
+library
+  exposed-modules:
+      ErrM
+      Syntax.Abs
+      Syntax.Lexer
+      Syntax.Parser
+      Syntax.Printer
+  other-modules:
+      Paths_Latte
+  hs-source-dirs:
+      src
+  build-depends:
+      array >=0.5 && <0.6
+    , base >=4.7 && <5
+    , containers >=0.6 && <0.7
+    , directory >=1.3 && <1.4
+    , filepath >=1.4 && <1.5
+    , hspec >=2.7 && <2.8
+    , mtl >=2.2 && <2.3
+    , process >=1.6 && <1.7
+  default-language: Haskell2010
+
+executable latc
+  main-is: Main.hs
+  other-modules:
+      Paths_Latte
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      Latte
+    , array >=0.5 && <0.6
+    , base >=4.7 && <5
+    , containers >=0.6 && <0.7
+    , directory >=1.3 && <1.4
+    , filepath >=1.4 && <1.5
+    , hspec >=2.7 && <2.8
+    , mtl >=2.2 && <2.3
+    , process >=1.6 && <1.7
+  default-language: Haskell2010
+
+test-suite Latte-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      SemanticAnalysis.AcceptanceSpec
+      Paths_Latte
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      Latte
+    , array >=0.5 && <0.6
+    , base >=4.7 && <5
+    , containers >=0.6 && <0.7
+    , directory >=1.3 && <1.4
+    , filepath >=1.4 && <1.5
+    , hspec >=2.7 && <2.8
+    , mtl >=2.2 && <2.3
+    , process >=1.6 && <1.7
+  default-language: Haskell2010
