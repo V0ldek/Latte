@@ -1,0 +1,5 @@
+ERROR
+Duplicate formal parameter identifiers: `x`.
+
+Line 2, character 5:
+In definition of method `a.foo`.

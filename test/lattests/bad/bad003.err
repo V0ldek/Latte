@@ -1,2 +1,5 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Duplicate formal parameter identifiers: `x`.
+
+Line 2, character 1:
+In definition of function `f`.

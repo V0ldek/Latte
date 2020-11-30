@@ -1,0 +1,4 @@
+ERROR
+Duplicate method identifiers: `foo`.
+Line 1, character 1
+Line 2, character 1

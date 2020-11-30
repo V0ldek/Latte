@@ -1,0 +1,9 @@
+class a {
+    int x;
+    int y;
+}
+
+class b extends a {
+    int y;
+    int z;
+}

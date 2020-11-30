@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2b502e849a4d30c56ccaaf4ce67a20d259c4113d37531ecb74bd01190542c4c0
+-- hash: 4430bb9e814179e64c9ec984db92aeb927e5057861af8e70424ca3e88bd2d911
 
 name:           Latte
 version:        0.1.0.0
@@ -28,6 +28,10 @@ source-repository head
 library
   exposed-modules:
       ErrM
+      Error
+      SemanticAnalysis.Analyser
+      SemanticAnalysis.Class
+      SemanticAnalysis.Toplevel
       Syntax.Abs
       Syntax.Lexer
       Syntax.Parser

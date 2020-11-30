@@ -1,0 +1,4 @@
+ERROR
+Cycle detected in inheritance hierarchy: `a` -> `a`.
+Line 1, character 1:
+In definition of class `a`.

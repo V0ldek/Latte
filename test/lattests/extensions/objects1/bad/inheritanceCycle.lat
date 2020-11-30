@@ -1,0 +1,21 @@
+class a extends e {
+
+}
+
+class b extends a {
+
+}
+
+class c extends b {
+
+}
+
+class d extends c {
+
+}
+
+class e extends d {
+
+}
+
+int main(){return 0;}

@@ -1,16 +1,19 @@
 module Main where
 
-import           Control.Monad      (unless, when)
-import           System.Environment (getArgs)
-import           System.Exit        (exitFailure, exitSuccess)
-import           System.IO          (hPutStr, hPutStrLn, stderr)
+import           Control.Monad             (unless, when)
+import           System.Environment        (getArgs)
+import           System.Exit               (exitFailure, exitSuccess)
+import           System.IO                 (hPutStr, hPutStrLn, stderr)
 
-import           ErrM               (toEither)
-import           Syntax.Lexer       (Token)
-import           Syntax.Parser      (myLexer, pProgram)
-import           Syntax.Printer     (Print, printTree)
+import           ErrM                      (toEither)
+import           SemanticAnalysis.Toplevel (Metadata, programMetadata)
+import           Syntax.Abs                (Pos, Program, unwrapPos)
+import           Syntax.Lexer              (Token)
+import           Syntax.Parser             (myLexer, pProgram)
+import           Syntax.Printer            (Print, printTree)
 
 type Err = Either String
+type ParseResult = (Program (Maybe Pos))
 
 type ParseFun a = [Token] -> Err a
 
@@ -33,10 +36,10 @@ unlessM p a = do
   b <- p
   unless b a
 
-runFile :: (Print a, Show a) => Verbosity -> ParseFun a -> FilePath -> IO ()
+runFile :: Verbosity -> ParseFun ParseResult -> FilePath -> IO ()
 runFile v p f = putStrLn f >> readFile f >>= run v p
 
-run :: (Print a, Show a) => Verbosity -> ParseFun a -> String -> IO ()
+run :: Verbosity -> ParseFun ParseResult -> String -> IO ()
 run v p s = case p ts of
     Left err -> do
       putStrErrLn "ERROR"
@@ -45,11 +48,22 @@ run v p s = case p ts of
       putStrErrLn err
       exitFailure
     Right tree -> do
+      let tree' = unwrapPos tree
       putStrErrLn "OK"
-      showTree v tree
+      showTree v tree'
+      case programMetadata tree' of
+        Left err -> do
+          putStrErrLn "ERROR"
+          putStrErrLn err
+          exitFailure
+        Right meta -> do
+          showMetadata v meta
       exitSuccess
   where
   ts = myLexer s
+
+showMetadata :: Verbosity -> Metadata -> IO ()
+showMetadata v meta = putStrV v $ show meta
 
 showTree :: (Show a, Print a) => Int -> a -> IO ()
 showTree v tree

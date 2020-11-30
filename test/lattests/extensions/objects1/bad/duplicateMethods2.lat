@@ -1,0 +1,4 @@
+class a {
+    void foo() { return; }
+    int foo(int x) { return 0; }
+}

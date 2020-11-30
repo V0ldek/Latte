@@ -1,10 +1,12 @@
 module SemanticAnalysis.AcceptanceSpec (spec) where
 
-import           ErrM             (toEither)
-import           Syntax.Parser    (myLexer, pProgram)
-import           System.Directory (listDirectory)
-import           System.FilePath  (replaceExtension, takeBaseName,
-                                   takeExtension, (</>))
+import           ErrM                      (toEither)
+import           SemanticAnalysis.Toplevel (programMetadata)
+import           Syntax.Abs                (unwrapPos)
+import           Syntax.Parser             (myLexer, pProgram)
+import           System.Directory          (listDirectory)
+import           System.FilePath           (replaceExtension, takeBaseName,
+                                            takeExtension, (</>))
 import           Test.Hspec
 
 data LatTest = LatTest { name :: String, contents :: String, err :: String }
@@ -27,6 +29,9 @@ spec = parallel $ do
     describe "Extension objects1 good" $ do
         tests <- runIO $ getLatTestsFromDir objects1GoodDir
         mapM_ goodTest tests
+    describe "Extension objects1 bad" $ do
+        tests <- runIO $ getLatTestsFromDir objects1BadDir
+        mapM_ badTest tests
     describe "Extension objects2 good" $ do
         tests <- runIO $ getLatTestsFromDir objects2GoodDir
         mapM_ goodTest tests
@@ -42,9 +47,10 @@ badTest latTest = do
 run :: String -> LatResult
 run s = case toEither $ pProgram ts of
     Left e  -> Error $ "ERROR\n" ++ e
-    Right _ -> Ok
+    Right t -> case programMetadata (unwrapPos t) of
+        Left e  -> Error $ "ERROR\n" ++ e
+        Right _ -> Ok
     where ts = myLexer s
-
 
 getLatTestsFromDir :: FilePath -> IO [LatTest]
 getLatTestsFromDir dir = do
@@ -72,7 +78,10 @@ arraysGoodDir :: FilePath
 arraysGoodDir = testRootDir </> "extensions" </> "arrays1"
 
 objects1GoodDir :: FilePath
-objects1GoodDir = testRootDir </> "extensions" </> "objects1"
+objects1GoodDir = testRootDir </> "extensions" </> "objects1" </> "good"
+
+objects1BadDir :: FilePath
+objects1BadDir = testRootDir </> "extensions" </> "objects1" </> "bad"
 
 objects2GoodDir :: FilePath
 objects2GoodDir = testRootDir </> "extensions" </> "objects2"
