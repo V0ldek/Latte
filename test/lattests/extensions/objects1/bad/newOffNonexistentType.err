@@ -1,0 +1,4 @@
+ERROR
+Use of undeclared type `a`.
+Line 2, character 13:
+new a

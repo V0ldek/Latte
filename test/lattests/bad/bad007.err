@@ -1,2 +1,5 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Conflicting declarations in the same scope.
+Line 3, character 13:
+In declaration of `x`.
+Line 2, character 13: previously declared here.

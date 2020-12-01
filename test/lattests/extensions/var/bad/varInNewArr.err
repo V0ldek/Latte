@@ -1,0 +1,4 @@
+ERROR
+Cannot use `var` in a `new` expression.
+Line 8, character 15:
+new var []

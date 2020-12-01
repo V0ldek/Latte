@@ -1,0 +1,4 @@
+ERROR
+Cannot assign to a value of type `int`.
+Line 2, character 5:
+42

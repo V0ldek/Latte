@@ -1,2 +1,4 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Mismatched number of arguments in function call. Expected 2, found 1.
+Line 4, character 17:
+foo (1)

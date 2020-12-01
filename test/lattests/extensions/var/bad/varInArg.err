@@ -1,0 +1,4 @@
+ERROR
+Cannot use `var` as the type of a function parameter.
+Line 1, character 9:
+var x

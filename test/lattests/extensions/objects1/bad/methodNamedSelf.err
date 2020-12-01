@@ -1,0 +1,6 @@
+ERROR
+Reserved names used as method identifiers: `self`.
+Line 2, character 5
+
+Line 1, character 1:
+In definition of class `a`.

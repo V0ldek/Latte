@@ -6,11 +6,13 @@ import           System.Exit               (exitFailure, exitSuccess)
 import           System.IO                 (hPutStr, hPutStrLn, stderr)
 
 import           ErrM                      (toEither)
+import           SemanticAnalysis.Analyser (analyse)
 import           SemanticAnalysis.Toplevel (Metadata, programMetadata)
 import           Syntax.Abs                (Pos, Program, unwrapPos)
 import           Syntax.Lexer              (Token)
 import           Syntax.Parser             (myLexer, pProgram)
 import           Syntax.Printer            (Print, printTree)
+import           Syntax.Rewriter           (rewrite)
 
 type Err = Either String
 type ParseResult = (Program (Maybe Pos))
@@ -37,7 +39,7 @@ unlessM p a = do
   unless b a
 
 runFile :: Verbosity -> ParseFun ParseResult -> FilePath -> IO ()
-runFile v p f = putStrLn f >> readFile f >>= run v p
+runFile v p f = readFile f >>= run v p
 
 run :: Verbosity -> ParseFun ParseResult -> String -> IO ()
 run v p s = case p ts of
@@ -51,18 +53,27 @@ run v p s = case p ts of
       let tree' = unwrapPos tree
       putStrErrLn "OK"
       showTree v tree'
-      case programMetadata tree' of
+      let rewritten = rewrite tree'
+      putStrErrV v "Rewritten:"
+      showTree v rewritten
+      () <- case programMetadata rewritten of
         Left err -> do
           putStrErrLn "ERROR"
           putStrErrLn err
           exitFailure
         Right meta -> do
           showMetadata v meta
+          case analyse meta of
+            Right _  -> exitSuccess
+            Left err -> do
+              putStrErrLn "ERROR"
+              putStrErrLn err
+              exitFailure
       exitSuccess
   where
   ts = myLexer s
 
-showMetadata :: Verbosity -> Metadata -> IO ()
+showMetadata :: Verbosity -> Metadata a -> IO ()
 showMetadata v meta = putStrV v $ show meta
 
 showTree :: (Show a, Print a) => Int -> a -> IO ()

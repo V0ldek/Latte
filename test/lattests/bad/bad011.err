@@ -1,2 +1,4 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Invalid expression type. Expected `int`, found `boolean`.
+Line 2, character 13:
+true

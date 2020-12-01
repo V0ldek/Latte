@@ -1,2 +1,5 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Mismatched types of arguments in function call.
+Argument `"foo"` has invalid type `string`. Expected type `int`.
+Line 4, character 9:
+printInt ("foo")

@@ -1,0 +1,5 @@
+class a {
+    int self;
+}
+
+int main() { return 0; }

@@ -1,0 +1,11 @@
+class box {
+    int x;
+}
+
+void foo(box[] x) { }
+
+int main() {
+    box[] x = new var[];
+    foo(x);
+    return 0;
+}

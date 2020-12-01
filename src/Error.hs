@@ -1,14 +1,33 @@
+{-# LANGUAGE FlexibleInstances #-}
 module Error where
 
-import           Syntax.Abs     (Pos, Positioned (..))
-import           Syntax.Printer (Print, printTree)
+import           Data.Maybe
+import           Syntax.Abs  (Pos, Positioned (..), Unwrappable (..))
+import           Syntax.Code
 
-errorMsg :: String -> Pos -> String -> String
+class WithContext a where
+  getCtx :: a -> String
+
+instance WithContext Code where
+  getCtx = codeString
+
+instance WithContext (Maybe Code) where
+  getCtx c = maybe "" getCtx c
+
+errorMsg :: Positioned a => String -> a -> String -> String
 errorMsg msg a ctx = msg ++ "\n" ++ ctxMsg
-    where ctxMsg = lineInfo a ++ ":\n" ++ ctx
+  where
+    ctxMsg = lineInfo (pos a) ++ ":\n" ++ ctx
 
-errorCtxMsg :: (Positioned a, Print a) => String -> a -> String
-errorCtxMsg msg ctx = errorMsg msg (pos ctx) (printTree ctx)
+errorMsgMb :: Positioned a => String -> Maybe a -> Maybe String -> String
+errorMsgMb msg a ctx = msg ++ "\n" ++ ctxMsg
+  where
+    ctxMsg = lineInfo (a >>= pos) ++ ":\n" ++ fromMaybe "" ctx
 
-lineInfo :: Pos -> String
-lineInfo (ln, ch) = "Line " ++ show ln ++ ", character " ++ show ch
+errorCtxMsg :: (Positioned a, WithContext a, Unwrappable f) => String -> f a -> String
+errorCtxMsg msg ctx = errorMsg msg (unwrap ctx) (getCtx $ unwrap ctx)
+
+lineInfo :: Maybe Pos -> String
+lineInfo pos = case pos of
+    Nothing       -> ""
+    Just (ln, ch) -> "Line " ++ show ln ++ ", character " ++ show ch

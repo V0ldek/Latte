@@ -1,4 +1,5 @@
-module SemanticAnalysis.Toplevel (programMetadata, Metadata) where
+-- Analyser of toplevel definitions generating class and function metadata.
+module SemanticAnalysis.Toplevel (programMetadata, Metadata(..)) where
 
 import           Control.Monad.State
 
@@ -6,24 +7,30 @@ import           Data.Either            (isRight)
 import           Data.List              (intercalate)
 import qualified Data.Map               as Map
 import           Data.Maybe             (fromJust)
-import           Error                  (errorMsg)
+import           Error                  (errorMsg, errorMsgMb)
+import           Identifiers
 import           SemanticAnalysis.Class
 import           Syntax.Abs
+import           Syntax.Code
 
-newtype Metadata = Meta [Class]
+newtype Metadata a = Meta (Map.Map Ident (Class a))
 
-programMetadata :: Program Pos -> Either String Metadata
+-- Analyse the toplevel definitions in a program and produce its metadata.
+programMetadata :: Program Code -> Either String (Metadata Code)
 programMetadata x = case x of
     Program _ ts -> topDefsMetadata ts
 
-topDefsMetadata :: [TopDef Pos] -> Either String Metadata
+topDefsMetadata :: [TopDef Code] -> Either String (Metadata Code)
 topDefsMetadata ts = do
     let fnDefs = filter isFnDef ts
         clDefs = filter isClDef ts
     functions <- fnDefsMetadata fnDefs
     topLevelClass <- clCons topLevelClassIdent Nothing [] functions
     classes <- clDefsMetadata clDefs
-    return $ Meta (topLevelClass : classes)
+    let allClasses = topLevelClass : rootCl : classes
+        clIdents = map clName allClasses
+        classMap = Map.fromList (zip clIdents allClasses)
+    return $ Meta classMap
     where isClDef x = case x of
             ClDef {}    -> True
             ClExtDef {} -> True
@@ -32,61 +39,62 @@ topDefsMetadata ts = do
             FnDef {} -> True
             _        -> False
 
-fnDefsMetadata :: [TopDef Pos] -> Either String [Method]
+fnDefsMetadata :: [TopDef Code] -> Either String [Method Code]
 fnDefsMetadata = mapM fnDefMetadata
     where fnDefMetadata def@(FnDef a typ i args _) =
             let res = funCons typ i args def
             in if isRight res then res else fnErr res
             where fnErr (Left s) = Left $ errorMsg (s ++ "\n") a ("In definition of function `" ++ showI i ++ "`.")
 
-type ClTraversalM = StateT (Map.Map Ident (Maybe Class)) (Either String)
+-- Monad for traversal of the class inheritance hierarchy.
+-- The state keeps all already visited classes and marks which are already
+-- resolved and which are currently being resolved. If we ever have a base class
+-- that is currently being resolved, we have found a cycle in the hierarchy.
+type ClTraversalM = StateT (Map.Map Ident ClassSlot) (Either String)
 
-clDefsMetadata :: [TopDef Pos] -> Either String [Class]
+data ClassSlot = Resolved (Class Code) | Resolving
+
+clDefsMetadata :: [TopDef Code] -> Either String [Class Code]
 clDefsMetadata cls = do
     res <- execStateT run Map.empty
-    return $ map fromJust (Map.elems res)
+    -- After we run we can assume that each class is Resolved (or we failed).
+    return $ map (\(Resolved cl) -> cl) (Map.elems res)
         where
-        run :: ClTraversalM [Class]
+        run :: ClTraversalM [Class Code]
         run = mapM clMetadata clIdents
-        clMetadata :: Ident -> ClTraversalM Class
+        clMetadata :: Ident -> ClTraversalM (Class Code)
         clMetadata i = do
             mbEntry <- gets $ Map.lookup i
             case mbEntry of
+                -- We never visited this class before, start resolution.
                 Nothing        -> case tsByIdent Map.! i of
                     def@(ClDef _ i _) -> do
                         cl <- defToMetadata def
-                        modify $ Map.insert i (Just cl)
+                        modify $ Map.insert i (Resolved cl)
                         return cl
                     def@(ClExtDef a i ext _) -> do
-                        unless (ext `Map.member` tsByIdent) (undefBaseError a i ext)
-                        modify $ Map.insert i Nothing
+                        unless (ext `Map.member` tsByIdent) (undefBaseError (codePos a) i ext)
+                        modify $ Map.insert i Resolving
                         baseCl <- clMetadata ext
                         nonExtCl <- defToMetadata def
                         cl <- case nonExtCl `clExtend` baseCl of
                                 Left s -> lift $ Left $ Error.errorMsg (s ++ "\n") a ("In definition of class `" ++ showI i ++ "`.")
                                 Right cl -> return cl
-                        modify $ Map.insert i (Just cl)
+                        modify $ Map.insert i (Resolved cl)
                         return cl
-                Just Nothing   -> inhCycleError (unwrap $ tsByIdent Map.! i) i (i : cycle ++ [i])
+                -- We already visited this class and were resolving its inheritance chain.
+                -- We must have come from a subclass, which implies a cycle in the hierarchy.
+                Just Resolving   -> inhCycleError (codePos $ unwrap $ tsByIdent Map.! i) i (i : cycle ++ [i])
                         where
                             cycle = takeWhile (/= i) (chain i)
                             chain i = let ClExtDef _ _ ext _ = tsByIdent Map.! i in ext : chain ext
-                Just (Just cl) -> return cl
+                -- We already resolved this class before, either because it was earlier on the definition list
+                -- or one of its subclasses was resolved earlier.
+                Just (Resolved cl) -> return cl
         clIdents = map tdIdent cls
         tsByIdent = Map.fromList $ zip clIdents cls
 
-inhCycleError :: Pos -> Ident -> [Ident] -> ClTraversalM a
-inhCycleError a i cycle = lift $ Left $ Error.errorMsg msg a ctx
-    where msg = "Cycle detected in inheritance hierarchy: " ++ cycleString ++ "."
-          ctx = "In definition of class `" ++ showI i ++ "`."
-          cycleString = intercalate " -> " (map (\i -> "`" ++ showI i ++ "`") cycle)
-
-undefBaseError :: Pos -> Ident -> Ident -> ClTraversalM a
-undefBaseError a i ext = lift $ Left $ Error.errorMsg msg a ctx
-    where msg = "Undefined base class `" ++ showI ext ++ "`."
-          ctx = "In definition of class `" ++ showI i ++ "`."
-
-defToMetadata :: TopDef Pos -> ClTraversalM Class
+defToMetadata :: TopDef Code -> ClTraversalM (Class Code)
 defToMetadata def = do
     let fldDefs = filter isFldDef clDefs
         mthdDefs = filter isMthdDef clDefs
@@ -118,5 +126,18 @@ tdIdent x = case x of
     ClDef _ i _      -> i
     ClExtDef _ i _ _ -> i
 
-instance Show Metadata where
-    show (Meta cls) = ".metadata\n\n" ++ intercalate "\n\n" (map show cls)
+instance Show (Metadata a) where
+    show (Meta cls) = ".metadata\n\n" ++ intercalate "\n\n" (map show $ Map.elems cls)
+
+-- Errors
+
+inhCycleError :: Maybe Pos -> Ident -> [Ident] -> ClTraversalM a
+inhCycleError a i cycle = lift $ Left $ Error.errorMsgMb msg a (Just ctx)
+    where msg = "Cycle detected in inheritance hierarchy: " ++ cycleString ++ "."
+          ctx = "In definition of class `" ++ showI i ++ "`."
+          cycleString = intercalate " -> " (map (\i -> "`" ++ showI i ++ "`") cycle)
+
+undefBaseError :: Maybe Pos -> Ident -> Ident -> ClTraversalM a
+undefBaseError a i ext = lift $ Left $ Error.errorMsgMb msg a (Just ctx)
+    where msg = "Undefined base class `" ++ showI ext ++ "`."
+          ctx = "In definition of class `" ++ showI i ++ "`."

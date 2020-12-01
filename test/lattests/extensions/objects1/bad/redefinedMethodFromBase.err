@@ -1,0 +1,7 @@
+ERROR
+Overriding method `bar` has a different type than the base method.
+Base method type is `int(int)`, overriding method type is `int(boolean)`.
+Line 7, character 5
+
+Line 6, character 1:
+In definition of class `b`.

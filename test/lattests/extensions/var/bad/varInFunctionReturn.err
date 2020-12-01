@@ -1,0 +1,6 @@
+ERROR
+Cannot use `var` as the return type of a function.
+Line 1, character 1:
+var foo () {
+  return 0 ;
+  }

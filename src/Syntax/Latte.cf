@@ -47,7 +47,7 @@ VRet.      Stmt ::= "return" ";" ;
 Cond.      Stmt ::= "if" "(" Expr ")" Stmt  ;
 CondElse.  Stmt ::= "if" "(" Expr ")" Stmt "else" Stmt  ;
 While.     Stmt ::= "while" "(" Expr ")" Stmt ;
-For.       Stmt ::= "for" "(" Type Ident ":" Expr ")";
+For.       Stmt ::= "for" "(" Type Ident ":" Expr ")" Stmt;
 SExp.      Stmt ::= Expr  ";" ;
 
 -- Types ---------------------------------------------------
@@ -56,6 +56,7 @@ Int.       Type ::= "int" ;
 Str.       Type ::= "string" ;
 Bool.      Type ::= "boolean" ;
 Void.      Type ::= "void" ;
+Var.       Type ::= "var" ;
 Arr.       Type ::= Type "[]" ;
 Cl.        Type ::= Ident ;
 internal   Fun. Type ::= Type "(" [Type] ")" ;
@@ -70,7 +71,9 @@ ELitInt.   Expr6 ::= Integer ;
 EString.   Expr6 ::= String ;
 ELitTrue.  Expr6 ::= "true" ;
 ELitFalse. Expr6 ::= "false" ;
-ELitNull.  Expr6 ::= "(" Type ")null" ;
+ENullI.    Expr6 ::= "(" Ident ")" "null" ;
+ENullArr.  Expr6 ::= "(" Ident "[]" ")" "null" ;
+internal ENull. Expr6 ::= "(" Type ")" "null" ;
 ENew.      Expr6 ::= "new" Type ;
 ENewArr.   Expr6 ::= "new" Type "[" Expr "]" ;
 EApp.      Expr6 ::= Expr6 "(" [Expr] ")" ;
