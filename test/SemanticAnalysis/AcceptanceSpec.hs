@@ -1,9 +1,11 @@
 module SemanticAnalysis.AcceptanceSpec (spec) where
 
 import           ErrM                      (toEither)
+import           SemanticAnalysis.Analyser (analyse)
 import           SemanticAnalysis.Toplevel (programMetadata)
 import           Syntax.Abs                (unwrapPos)
 import           Syntax.Parser             (myLexer, pProgram)
+import           Syntax.Rewriter           (rewrite)
 import           System.Directory          (listDirectory)
 import           System.FilePath           (replaceExtension, takeBaseName,
                                             takeExtension, (</>))
@@ -35,6 +37,12 @@ spec = parallel $ do
     describe "Extension objects2 good" $ do
         tests <- runIO $ getLatTestsFromDir objects2GoodDir
         mapM_ goodTest tests
+    describe "Extension var good" $ do
+        tests <- runIO $ getLatTestsFromDir varGoodDir
+        mapM_ goodTest tests
+    describe "Extension var bad" $ do
+        tests <- runIO $ getLatTestsFromDir varBadDir
+        mapM_ badTest tests
 
 goodTest :: LatTest -> Spec
 goodTest latTest = do
@@ -47,9 +55,11 @@ badTest latTest = do
 run :: String -> LatResult
 run s = case toEither $ pProgram ts of
     Left e  -> Error $ "ERROR\n" ++ e
-    Right t -> case programMetadata (unwrapPos t) of
+    Right t -> case programMetadata (rewrite $ unwrapPos t) of
         Left e  -> Error $ "ERROR\n" ++ e
-        Right _ -> Ok
+        Right m -> case analyse m of
+            Left e  -> Error $ "ERROR\n" ++ e
+            Right _ -> Ok
     where ts = myLexer s
 
 getLatTestsFromDir :: FilePath -> IO [LatTest]
@@ -88,6 +98,12 @@ objects2GoodDir = testRootDir </> "extensions" </> "objects2"
 
 structGoodDir :: FilePath
 structGoodDir = testRootDir </> "extensions" </> "struct"
+
+varGoodDir :: FilePath
+varGoodDir = testRootDir </> "extensions" </> "var" </> "good"
+
+varBadDir :: FilePath
+varBadDir = testRootDir </> "extensions" </> "var" </> "bad"
 
 testRootDir :: FilePath
 testRootDir = "." </> "test" </> "lattests"

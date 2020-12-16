@@ -1,0 +1,9 @@
+boolean foo() { return false; }
+
+int main() {
+    if (foo()) int x = 42;
+
+    printInt(x);
+
+    return 0;
+}

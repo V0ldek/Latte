@@ -1,0 +1,9 @@
+int[] foo() { return new int[]; }
+
+int main() {
+    for (int a : foo()) {}
+
+    printInt(a);
+
+    return 0;
+}

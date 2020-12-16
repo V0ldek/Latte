@@ -1,0 +1,4 @@
+ERROR
+Cannot use `var` as the type of a field.
+Line 2, character 5:
+var x ;

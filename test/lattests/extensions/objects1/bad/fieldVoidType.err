@@ -1,0 +1,4 @@
+ERROR
+Cannot use `void` as a type of a field.
+Line 2, character 5:
+void x ;

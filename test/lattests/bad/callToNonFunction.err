@@ -1,0 +1,4 @@
+ERROR
+Invalid call to a non-function type `int`.
+Line 3, character 5:
+a (2)

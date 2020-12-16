@@ -1,0 +1,4 @@
+int main() {
+    int x = new a[10];
+    return 0;
+}

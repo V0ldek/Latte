@@ -1,0 +1,6 @@
+ERROR
+Conflicting field/method identifiers: `foo`.
+Line 2, character 5 conflicting with Line 4, character 5
+
+Line 1, character 1:
+In definition of class `a`.

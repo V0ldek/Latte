@@ -7,14 +7,3 @@ class b extends a {
     int bar(boolean y) { return 1; }
     int baz(int z) { return 2; }
 }
-
-int main() {
-    a a1 = new a;
-    a a2 = new b;
-
-    int bar1 = a1.bar(0);
-    int bar2 = a2.bar(false);
-
-    printInt(bar1);
-    printInt(bar2);
-}

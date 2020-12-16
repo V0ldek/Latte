@@ -4,17 +4,17 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 4430bb9e814179e64c9ec984db92aeb927e5057861af8e70424ca3e88bd2d911
+-- hash: 07a5b34f37f9b22ff69be83173953e37bf15964dd876bd3357dcc6e7e900a54a
 
 name:           Latte
-version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/Latte#readme>
+version:        0.8.0.0
+description:    Please see the README on GitHub at <https://github.com/V0ldek/Latte#readme>
 homepage:       https://github.com/githubuser/Latte#readme
 bug-reports:    https://github.com/githubuser/Latte/issues
-author:         Author name here
-maintainer:     example@example.com
-copyright:      2020 Author name here
-license:        BSD3
+author:         Mateusz Gienieczko
+maintainer:     matgienieczko@gmail.com
+copyright:      2020 Mateusz Gienieczko
+license:        MIT
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
@@ -29,13 +29,17 @@ library
   exposed-modules:
       ErrM
       Error
+      Identifiers
       SemanticAnalysis.Analyser
       SemanticAnalysis.Class
+      SemanticAnalysis.ControlFlow
       SemanticAnalysis.Toplevel
       Syntax.Abs
+      Syntax.Code
       Syntax.Lexer
       Syntax.Parser
       Syntax.Printer
+      Syntax.Rewriter
   other-modules:
       Paths_Latte
   hs-source-dirs:

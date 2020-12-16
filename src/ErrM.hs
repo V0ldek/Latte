@@ -23,8 +23,7 @@ instance MonadFail Err where
 instance Applicative Err where
   pure = Ok
   (Bad s) <*> _ = Bad s
-  (Ok f) <*> o  = liftM f o
-
+  (Ok f) <*> o  = f <$> o
 
 instance Functor Err where
   fmap = liftM

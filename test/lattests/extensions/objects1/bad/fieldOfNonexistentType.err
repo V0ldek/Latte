@@ -1,0 +1,4 @@
+ERROR
+Use of undeclared type `b`.
+Line 2, character 5:
+b x ;

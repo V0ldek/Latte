@@ -1,2 +1,4 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Invalid expression type. Expected `int`, found `void`.
+Line 3, character 17:
+return ;

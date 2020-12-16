@@ -1,0 +1,5 @@
+int main() {
+    var a = 1, b, c = 3;
+    b = 2;
+    return a + b + c;
+}

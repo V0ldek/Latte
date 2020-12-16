@@ -1,0 +1,14 @@
+class box {
+    int x;
+}
+
+void foo(box x) {
+    printInt(x.x);
+}
+
+int main() {
+    var x = new box;
+    x.x = 42;
+    foo(x);
+    return 0;
+}

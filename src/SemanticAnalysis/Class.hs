@@ -1,132 +1,129 @@
+-- Definitions of internal metadata types for language entities.
 module SemanticAnalysis.Class (
     Class (..),
     Field (..),
     Method (..),
-    MethodCode (..),
-    mthdBody,
     mthdType,
-    topLevelClassIdent,
+    mthdTypeIgnSelf,
     clCons,
+    rootCl,
+    rootType,
     fldCons,
     funCons,
     mthdCons,
-    clExtend
+    clExtend,
+    showType
 ) where
 
-import           Control.Monad
+import           Control.Monad (unless)
 import           Data.List     (intercalate, sort)
 import qualified Data.Map      as Map
-import           Error
+import           Data.Maybe
+import           Error         (lineInfo)
+import           Identifiers
 import           Syntax.Abs
+import           Syntax.Code
 
-data Class = Class { clName :: Ident, clBase :: Maybe Class, clFields :: [Field], clMethods :: [Method] }
+data Class a = Class { clName :: Ident, clBase :: Maybe (Class a), clFields :: [Field], clMethods :: [Method a] }
 
-data Field = Fld { fldName :: Ident, fldType :: Type (), fldCode :: ClDef Pos}
+data Field = Fld { fldName :: Ident, fldType :: Type (), fldCode :: ClDef Code}
 
-data Method = Mthd {
+data Method a = Mthd {
      mthdName :: Ident,
      mthdRet  :: Type (),
-     mthdThis :: Maybe (Type ()),
-     mthdArgs :: [Arg ()],
-     mthdCode :: MethodCode }
+     mthdSelf :: Maybe (Type ()),
+     mthdArgs :: [Arg Code],
+     mthdBlk  :: Block a,
+     mthdCode :: Code }
 
-data MethodCode = FnCode (TopDef Pos) | MthdCode (ClDef Pos)
-
-instance Positioned MethodCode where
-    pos x = case x of
-        FnCode td   -> unwrap td
-        MthdCode cl -> unwrap cl
-
-mthdBody :: Method -> Block Pos
-mthdBody x = case mthdCode x of
-    FnCode (FnDef _ _ _ _ blk)    -> blk
-    MthdCode (MthDef _ _ _ _ blk) -> blk
-
-mthdType :: Method -> Type ()
-mthdType mthd = case mthdThis mthd of
-    Nothing  -> mthdTypeIgnThis mthd
-    Just typ -> let Fun _ ret args = mthdTypeIgnThis mthd
+-- Get the type of the method, including the hidden `self` parameter.
+mthdType :: Method a -> Type ()
+mthdType mthd = case mthdSelf mthd of
+    Nothing  -> mthdTypeIgnSelf mthd
+    Just typ -> let Fun _ ret args = mthdTypeIgnSelf mthd
                 in  Fun () ret (typ : args)
 
-mthdTypeIgnThis :: Method -> Type ()
-mthdTypeIgnThis (Mthd _ ret _ args _) = Fun () ret (map (\(Arg _ t _) -> t) args)
+-- Get the type of the method, but without the hidden `self` parameter.
+mthdTypeIgnSelf :: Method a -> Type ()
+mthdTypeIgnSelf (Mthd _ ret _ args _ _) = Fun () ret (map (\(Arg _ t _) -> () <$ t) args)
 
-topLevelClassIdent :: Ident
-topLevelClassIdent = Ident "~cl_TopLevel"
+-- Phony class serving as a root of the inheritance hierarchy.
+rootCl :: Class a
+rootCl = Class (Ident "~object") Nothing [] []
 
-clCons :: Ident -> Maybe Class -> [Field] -> [Method] -> Either String Class
+rootType :: Type ()
+rootType = Cl () (clName rootCl)
+
+-- Construct a class from its constituents, checking name rule violations.
+clCons :: Ident -> Maybe (Class a) -> [Field] -> [Method a]  -> Either String (Class a)
 clCons name base flds mthds = do
     let dupFlds = snd $ findDupsBy (showI . fldName) flds
         dupMthds = snd $ findDupsBy (showI . mthdName) mthds
+        conflicts = snd $ findConflictsBy (showI . fldName) (showI . mthdName) flds mthds
+        reservedFlds = filter (\f -> fldName f `elem` reservedNames) flds
+        reservedMthds = filter (\m -> mthdName m `elem` reservedNames) mthds
     unless (null dupFlds) (dupFldsError dupFlds)
     unless (null dupMthds) (dupMthdsError dupMthds)
-    return $ Class name base flds mthds
+    unless (null conflicts) (conflFldsAndMthdsError conflicts)
+    unless (null reservedFlds) (reservedFldError reservedFlds)
+    unless (null reservedMthds) (reservedMthdsError reservedMthds)
+    let base' = if isNothing base then Just rootCl else Nothing
+    return $ Class name base' flds mthds
 
-dupFldsError :: [Field] -> Either String a
-dupFldsError flds = Left $ intercalate "\n" (header : ctxs)
-    where header = "Duplicate field identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . fldName) flds) ++ "`."
-          ctxs = sort $ map ctx flds
-          ctx fld = lineInfo (unwrap $ fldCode fld)
-
-dupMthdsError :: [Method] -> Either String a
-dupMthdsError mthds = Left $ intercalate "\n" (header : ctxs)
-    where header = "Duplicate method identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . mthdName) mthds) ++ "`."
-          ctxs = sort $ map ctx mthds
-          ctx mthd = lineInfo (pos $ mthdCode mthd)
-
-fldCons :: Type a -> Ident -> ClDef Pos -> Field
+-- Construct a field from ist constituents.
+fldCons :: Type a -> Ident -> ClDef Code -> Field
 fldCons typ i = Fld i (() <$ typ)
 
-funCons :: Type a -> Ident -> [Arg c] -> TopDef Pos -> Either String Method
-funCons typ i args code = do
+-- Construct a method representing a toplevel function from its constituents.
+-- Checks parameter naming rules.
+funCons :: Type a -> Ident -> [Arg Code] -> TopDef Code -> Either String (Method Code)
+funCons typ i args def = do
+    let FnDef _ _ _ _ blk = def
     cons <- baseMethodCons typ i Nothing args
-    return $ cons $ FnCode code
+    return $ cons blk (unwrap def)
 
-mthdCons :: Type a -> Ident -> Type b -> [Arg c] -> ClDef Pos -> Either String Method
-mthdCons typ i thisTyp args code = do
-    cons <- baseMethodCons typ i (Just thisTyp) args
-    return $ cons $ MthdCode code
+-- Construct a method representing a class method from its constituents.
+-- Checks parameter naming rules.
+mthdCons :: Type a -> Ident -> Type b -> [Arg Code] -> ClDef Code -> Either String (Method Code)
+mthdCons typ i selfTyp args def = do
+    let MthDef _ _ _ _ blk = def
+    cons <- baseMethodCons typ i (Just selfTyp) args
+    return $ cons blk (unwrap def)
 
-baseMethodCons :: Type a -> Ident -> Maybe (Type b) -> [Arg c] -> Either String (MethodCode -> Method)
-baseMethodCons typ i thisTyp args = do
+-- Common constructor for both toplevel functions and class methods.
+baseMethodCons :: Type a -> Ident -> Maybe (Type b) -> [Arg Code] -> Either String (Block Code -> Code -> Method Code)
+baseMethodCons typ i selfTyp args = do
     let dupArgs = fst $ findDupsBy (\(Arg _ _ i) -> showI i) args
     unless (null dupArgs) (dupArgsError dupArgs)
-    return $ Mthd i (() <$ typ) (fmap (() <$) thisTyp) (map (() <$) args)
+    return $ Mthd i (() <$ typ) (fmap (() <$) selfTyp) args
 
-dupArgsError :: [String] -> Either String a
-dupArgsError args = Left $ "Duplicate formal parameter identifiers: `" ++ intercalate "`, `" args ++ "`."
-
-clExtend :: Class -> Class -> Either String Class
+-- Extend a given base class with the given class.
+-- In other words, set the base of the given class and fill its
+-- field and method tables according to inheritance rules.
+clExtend :: Class Code -> Class Code -> Either String (Class Code)
 clExtend cl base = do
     flds <- combinedFlds
-    return $ Class (clName cl) (Just base) flds combinedMthds
+    mthds <- combinedMthds
+    return $ Class (clName cl) (Just base) flds mthds
     where combinedFlds = let flds = clFields base ++ clFields cl
                              (_, dups) = findDupsBy fldName flds
                          in  if null dups then Right flds else redefFldsError dups
-          combinedMthds = let subMthds = Map.fromList $ map (\m -> ((mthdName m, mthdTypeIgnThis m), m)) (clMethods cl)
+          combinedMthds = let subMthds = Map.fromList $ map (\m -> (mthdName m, m)) (clMethods cl)
                          in run (clMethods base) subMthds
                          where
-                            run [] subMthds = Map.elems subMthds
-                            run (b:bs) subMthds = let key = (mthdName b, mthdTypeIgnThis b)
+                            run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String [Method Code]
+                            run [] subMthds = return $ Map.elems subMthds
+                            run (b:bs) subMthds = let key = mthdName b
                                                   in case Map.lookup key subMthds of
-                                                      Nothing -> b : run bs subMthds
-                                                      Just m  -> m : run bs (Map.delete key subMthds)
-
-redefFldsError :: [Field] -> Either String a
-redefFldsError flds = Left $ intercalate "\n" (header : ctxs)
-    where header = "Conflicting field definitions in subclass: `" ++ intercalate "`, `" (dedup $ map (showI . fldName) flds) ++ "`."
-          ctxs = sort $ map ctx flds
-          ctx fld = lineInfo (unwrap $ fldCode fld)
-
--- TODO: better error message
-redefMthdsError :: [Method] -> Either String a
-redefMthdsError mthds = Left $ intercalate "\n" (header : ctxs)
-    where header = "Invalid type of virtual method overload in subclass: `" ++ intercalate "`, `" (dedup $ map (showI . mthdName) mthds) ++ "`."
-          ctxs = sort $ map ctx mthds
-          ctx mthd = lineInfo (pos $ mthdCode mthd)
+                                                      Nothing -> run bs subMthds >>= (\bs -> return $ b : bs)
+                                                      Just m  -> do
+                                                          let bt = mthdTypeIgnSelf b
+                                                              mt = mthdTypeIgnSelf m
+                                                          if bt == mt then run bs (Map.delete key subMthds) >>= (\bs -> return $ m : bs)
+                                                                      else redefMthdError b m
 
 -- Mostly used for debugging purposes.
-instance Show Class where
+instance Show (Class a) where
     show (Class (Ident name) base clFields clMethods) = intercalate "\n" (header : map indent (fields ++ methods))
         where
             header = ".class " ++ name ++ extends ++ ":"
@@ -137,7 +134,7 @@ instance Show Class where
             methods = ".methods:" : map (indent . show) clMethods
             indent x = "  " ++ x
 
-instance Show Method where
+instance Show (Method a) where
     show mthd = showType (mthdType mthd) ++ " " ++ showI (mthdName mthd) ++ ";"
 
 instance Show Field where
@@ -149,21 +146,87 @@ showType typ = case typ of
     Str _             -> "string"
     Bool _            -> "boolean"
     Void _            -> "void"
+    Var _             -> "var"
     Arr _ t           -> showType t ++ "[]"
     Cl _ (Ident name) -> name
     Fun _ typ typs    -> showType typ ++ "(" ++ intercalate ", " (map showType typs) ++ ")"
-    Ref _ t           -> showType t ++ "&"
+    Ref _ t           -> showType t
 
+-- Find duplicates in a given list based on a key selector.
+-- Returns a deduplicated list of duplicated keys and a list of values such that
+-- there exists a value with the same key.
 findDupsBy :: Ord k => (a -> k) -> [a] -> ([k], [a])
 findDupsBy f ds = collect $ foldr checkForDup (Map.empty, []) ds
- where
-  checkForDup a (m, dups) =
-    let k = f a
-    in  if Map.member k m then (m, (k, a) : dups) else (Map.insert k a m, dups)
-  collect (m, dups) =
-    let (ks, as) = unzip dups in (ks, foldr (\k as' -> m Map.! k : as') as ks)
+    where
+    checkForDup a (m, dups) =
+        let k = f a
+        in  if Map.member k m then (m, (k, a) : dups) else (Map.insert k a m, dups)
+    collect (m, dups) =
+        let (ks, as) = unzip dups in (ks, foldr (\k as' -> m Map.! k : as') as ks)
 
+-- Inner join based on a key selector of two lists.
+-- Returns a deduplicated list of keys that participated in a join
+-- and the list of resulting products.
+findConflictsBy :: Ord k => (a -> k) -> (b -> k) -> [a] -> [b] -> ([k], [(a, b)])
+findConflictsBy fa fb as bs = unzip $ foldr checkForConfl [] bs
+    where
+    m = Map.fromList $ zip (map fa as) as
+    checkForConfl b confls =
+        let k = fb b
+        in  case Map.lookup k m of
+                Nothing -> confls
+                Just a  -> (k, (a, b)) : confls
+
+-- O(nlogn) deduplication.
 dedup :: Ord a => [a] -> [a]
 dedup xs = run (sort xs)
     where run []     = []
           run (x:xs) = x : run (dropWhile (== x) xs )
+
+-- Errors
+
+redefFldsError :: [Field] -> Either String a
+redefFldsError flds = Left $ intercalate "\n" (header : ctxs)
+    where header = "Conflicting field definitions in subclass: `" ++ intercalate "`, `" (dedup $ map (showI . fldName) flds) ++ "`."
+          ctxs = sort $ map ctx flds
+          ctx fld = lineInfo (codePos $ unwrap $ fldCode fld)
+
+redefMthdError :: Method Code -> Method Code -> Either String a
+redefMthdError base override = Left $ header ++ ctx
+    where header = "Overriding method `" ++ showI (mthdName base)
+            ++ "` has a different type than the base method.\nBase method type is `" ++ showType (mthdTypeIgnSelf base)
+            ++ "`, overriding method type is `" ++ showType (mthdTypeIgnSelf override) ++ "`.\n"
+          ctx = lineInfo (codePos $ mthdCode override)
+
+dupFldsError :: [Field] -> Either String a
+dupFldsError flds = Left $ intercalate "\n" (header : ctxs)
+    where header = "Duplicate field identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . fldName) flds) ++ "`."
+          ctxs = sort $ map ctx flds
+          ctx fld = lineInfo (codePos $ unwrap $ fldCode fld)
+
+dupMthdsError :: [Method a] -> Either String b
+dupMthdsError mthds = Left $ intercalate "\n" (header : ctxs)
+    where header = "Duplicate method identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . mthdName) mthds) ++ "`."
+          ctxs = sort $ map ctx mthds
+          ctx mthd = lineInfo (pos $ mthdCode mthd)
+
+conflFldsAndMthdsError :: [(Field, Method a)] -> Either String b
+conflFldsAndMthdsError confls = Left $ intercalate "\n" (header : ctxs)
+    where header = "Conflicting field/method identifiers: `" ++ intercalate "`, `" (map (showI . fldName . fst) confls) ++ "`."
+          ctxs = sort $ map ctx confls
+          ctx (fld, mthd) = lineInfo (codePos $ unwrap $ fldCode fld) ++ " conflicting with " ++ lineInfo (pos $ mthdCode mthd)
+
+reservedFldError :: [Field] -> Either String a
+reservedFldError flds = Left $ intercalate "\n" (header : ctxs)
+    where header = "Reserved names used as field identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . fldName) flds) ++ "`."
+          ctxs = sort $ map ctx flds
+          ctx fld = lineInfo (codePos $ unwrap $ fldCode fld)
+
+reservedMthdsError :: [Method a] -> Either String b
+reservedMthdsError mthds = Left $ intercalate "\n" (header : ctxs)
+    where header = "Reserved names used as method identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . mthdName) mthds) ++ "`."
+          ctxs = sort $ map ctx mthds
+          ctx mthd = lineInfo (pos $ mthdCode mthd)
+
+dupArgsError :: [String] -> Either String a
+dupArgsError args = Left $ "Duplicate formal parameter identifiers: `" ++ intercalate "`, `" args ++ "`."

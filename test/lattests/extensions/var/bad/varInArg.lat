@@ -1,0 +1,1 @@
+int foo(var x) { return x; }

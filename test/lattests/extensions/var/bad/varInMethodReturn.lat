@@ -1,0 +1,3 @@
+class a {
+    var foo() { return 0; }
+}

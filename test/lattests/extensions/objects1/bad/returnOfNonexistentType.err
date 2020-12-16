@@ -1,0 +1,5 @@
+ERROR
+Use of undeclared type `a`.
+Line 1, character 1:
+a foo () {
+  }

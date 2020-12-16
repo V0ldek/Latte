@@ -1,0 +1,16 @@
+void foo(int[] tab) {
+    for (var x : tab) {
+        printInt(x);
+    }
+}
+
+int main() {
+    var tab = new int[3];
+    tab[0] = 17;
+    tab[1] = 42;
+    tab[2] = 37;
+
+    foo(tab);
+
+    return 1; 
+}

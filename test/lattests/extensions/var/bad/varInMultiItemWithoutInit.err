@@ -1,0 +1,4 @@
+ERROR
+Cannot declare a `var` type variable without initialization.
+Line 2, character 16:
+b

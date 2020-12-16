@@ -1,4 +1,4 @@
 class a {
     int foo(int x) { return 0; }
-    int foo(int x) { return 0; }
+    int foo(boolean x) { return 0; }
 }

@@ -1,2 +1,6 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Control may reach the end of a non-void function without a return statement. Expected return type: `int`.
+Line 6, character 1:
+int foo (boolean b){
+  b = true ;
+  }

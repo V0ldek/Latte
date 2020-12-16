@@ -1,0 +1,4 @@
+ERROR
+Cannot use `void` as a type of a value.
+Line 2, character 13:
+new void [10]

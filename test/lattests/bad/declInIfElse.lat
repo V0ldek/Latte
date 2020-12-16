@@ -1,0 +1,10 @@
+boolean foo() { return false; }
+
+int main() {
+    if (foo()) int x = 42;
+    else int x = 37;
+
+    printInt(x);
+
+    return 0;
+}

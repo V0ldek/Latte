@@ -1,2 +1,4 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Cannot equate expressions of types `string` and `boolean`. Only expressions of types within the same inheritance chain can be equated.
+Line 4, character 7:
+"true" == true

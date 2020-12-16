@@ -1,2 +1,5 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Mismatched types of arguments in function call.
+Argument `1` has invalid type `int`. Expected type `string`.
+Line 4, character 9:
+printString (1)

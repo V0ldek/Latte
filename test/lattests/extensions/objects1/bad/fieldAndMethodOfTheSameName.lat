@@ -1,0 +1,7 @@
+class a {
+    int foo;
+
+    boolean foo(int x) { return true; }
+}
+
+int main() { return 0; }

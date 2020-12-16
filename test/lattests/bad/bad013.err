@@ -1,2 +1,4 @@
 ERROR
-syntax error at line 1, column 1 before `/'
+Cannot add expressions of types `string` and `int`. Only two expressions of type `int` or two expressions of type `string` can be added.
+Line 3, character 11:
+"pi" + 1

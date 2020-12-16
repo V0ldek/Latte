@@ -14,7 +14,7 @@ showI :: Ident -> String
 showI (Ident i) = i
 
 class Positioned a where
-  pos :: a -> Pos
+  pos :: a -> Maybe Pos
 
 class Unwrappable f where
   unwrap :: f a -> a
@@ -23,7 +23,7 @@ unwrapPos :: Program (Maybe Pos) -> Program Pos
 unwrapPos p = fromJust <$> p
 
 instance Positioned Pos where
-  pos = id
+  pos = Just
 
 instance Functor Program where
     fmap f x = case x of
@@ -111,7 +111,7 @@ data Stmt a
     | Cond a (Expr a) (Stmt a)
     | CondElse a (Expr a) (Stmt a) (Stmt a)
     | While a (Expr a) (Stmt a)
-    | For a (Type a) Ident (Expr a)
+    | For a (Type a) Ident (Expr a) (Stmt a)
     | SExp a (Expr a)
   deriving (Eq, Ord, Show, Read)
 
@@ -128,7 +128,7 @@ instance Functor Stmt where
         Cond a expr stmt -> Cond (f a) (fmap f expr) (fmap f stmt)
         CondElse a expr stmt1 stmt2 -> CondElse (f a) (fmap f expr) (fmap f stmt1) (fmap f stmt2)
         While a expr stmt -> While (f a) (fmap f expr) (fmap f stmt)
-        For a type_ ident expr -> For (f a) (fmap f type_) ident (fmap f expr)
+        For a type_ ident expr stmt -> For (f a) (fmap f type_) ident (fmap f expr) (fmap f stmt)
         SExp a expr -> SExp (f a) (fmap f expr)
 
 instance Unwrappable Stmt where
@@ -144,7 +144,7 @@ instance Unwrappable Stmt where
     Cond a _ _       -> a
     CondElse a _ _ _ -> a
     While a _ _      -> a
-    For a _ _ _      -> a
+    For a _ _ _ _    -> a
     SExp a _         -> a
 
 data Item a = NoInit a Ident | Init a Ident (Expr a)
@@ -165,6 +165,7 @@ data Type a
     | Str a
     | Bool a
     | Void a
+    | Var a
     | Arr a (Type a)
     | Cl a Ident
     | Fun a (Type a) [Type a]
@@ -177,6 +178,7 @@ instance Functor Type where
         Str a             -> Str (f a)
         Bool a            -> Bool (f a)
         Void a            -> Void (f a)
+        Var a             -> Var (f a)
         Arr a type_       -> Arr (f a) (fmap f type_)
         Cl a ident        -> Cl (f a) ident
         Fun a type_ types -> Fun (f a) (fmap f type_) (map (fmap f) types)
@@ -188,6 +190,7 @@ instance Unwrappable Type where
       Str a     -> a
       Bool a    -> a
       Void a    -> a
+      Var a     -> a
       Arr a _   -> a
       Cl a _    -> a
       Fun a _ _ -> a
@@ -199,7 +202,9 @@ data Expr a
     | EString a String
     | ELitTrue a
     | ELitFalse a
-    | ELitNull a (Type a)
+    | ENullI a Ident
+    | ENullArr a Ident
+    | ENull a (Type a)
     | ENew a (Type a)
     | ENewArr a (Type a) (Expr a)
     | EApp a (Expr a) [Expr a]
@@ -221,7 +226,9 @@ instance Functor Expr where
         EString a string -> EString (f a) string
         ELitTrue a -> ELitTrue (f a)
         ELitFalse a -> ELitFalse (f a)
-        ELitNull a type_ -> ELitNull (f a) (fmap f type_)
+        ENullI a ident -> ENullI (f a) ident
+        ENullArr a ident -> ENullArr (f a) ident
+        ENull a type_ -> ENull (f a) (fmap f type_)
         ENew a type_ -> ENew (f a) (fmap f type_)
         ENewArr a type_ expr -> ENewArr (f a) (fmap f type_) (fmap f expr)
         EApp a expr exprs -> EApp (f a) (fmap f expr) (map (fmap f) exprs)
@@ -242,7 +249,9 @@ instance Unwrappable Expr where
     EString a _   -> a
     ELitTrue a    -> a
     ELitFalse a   -> a
-    ELitNull a _  -> a
+    ENullI a _    -> a
+    ENullArr a _  -> a
+    ENull a _     -> a
     ENew a _      -> a
     ENewArr a _ _ -> a
     EApp a _ _    -> a
