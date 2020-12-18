@@ -1,4 +1,4 @@
-module Main where
+module Latc where
 
 import           Control.Monad             (unless, when)
 import           System.Environment        (getArgs)

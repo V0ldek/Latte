@@ -1,0 +1,55 @@
+.metadata: [
+  .classes: [
+    ~cl_TopLevel: [
+      .fields: [ ]
+      .methods: [
+        int() ~cl_TopLevel.main;
+        int(int) ~cl_TopLevel.fac;
+        void(int) ~cl_TopLevel.printInt;
+        void(string) ~cl_TopLevel.printString;
+        void() ~cl_TopLevel.error;
+        int() ~cl_TopLevel.readInt;
+        string() ~cl_TopLevel.readString;
+      ]
+    ]
+  ]
+]
+
+.method ~cl_TopLevel.main: [
+  .L_entry:
+    %v_1 := call ~cl_TopLevel.readInt();
+    %v_2 := call ~cl_TopLevel.fac(%v_1);
+    call ~cl_TopLevel.printInt(%v_2);
+    return 0;
+]
+
+.method ~cl_TopLevel.fac: [
+  .L_entry:
+  .L_cond1:
+    %v_1 := %a_0 <= 1;
+    jump if %v_1 then .L_then1 else .L_else1;
+  .L_else1:
+    %v_2 := %a_0 - 1;
+    %v_3 := call ~cl_TopLevel.fac(%v_2);
+    %v_4 := %a_0 * %v_3;
+    return %v_4;
+  .L_then1:
+    return 1;
+]
+/*
+.method ~cl_TopLevel.fac: [
+  .L_entry:
+  .L_cond1:
+    %v_1 := %a_0 <= 1;
+    jump if %v_1 then .L_then1 else .L_else1;
+  .L_else1:
+    %v_2 := %a_0 - 1;
+    %v_3 := call ~cl_TopLevel.fac(%v_2);
+    %v_4 := %a_0 * %v_3;
+    jump .L_end;
+  .L_then1:
+  .L_end:
+    %v_5 := phi (.L_then1: 1, .L_else1: %v_4);
+    return %v_5;
+]
+*/

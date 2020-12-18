@@ -5,6 +5,12 @@ module Identifiers where
 
 import           Syntax.Abs
 
+class ToString a where
+    toStr :: a -> String
+
+instance ToString Ident where
+    toStr (Ident s) = s
+
 -- Identifier of the class that wraps toplevel functions.
 topLevelClassIdent :: Ident
 topLevelClassIdent = Ident "~cl_TopLevel"
@@ -24,8 +30,14 @@ forIndexIdent = Ident "~l_idx"
 selfSymIdent :: Ident
 selfSymIdent = Ident "self"
 
+mainSymIdent :: Ident
+mainSymIdent = Ident "main"
+
 arrayLengthIdent :: Ident
 arrayLengthIdent = Ident "length"
+
+entryLabel :: String
+entryLabel = "L_entry"
 
 reservedNames :: [Ident]
 reservedNames = [selfSymIdent]
