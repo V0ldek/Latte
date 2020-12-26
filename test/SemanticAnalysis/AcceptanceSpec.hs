@@ -2,7 +2,7 @@ module SemanticAnalysis.AcceptanceSpec (spec) where
 
 import           ErrM                      (toEither)
 import           SemanticAnalysis.Analyser (analyse)
-import           SemanticAnalysis.Toplevel (programMetadata)
+import           SemanticAnalysis.TopLevel (programMetadata)
 import           Syntax.Abs                (unwrapPos)
 import           Syntax.Parser             (myLexer, pProgram)
 import           Syntax.Rewriter           (rewrite)

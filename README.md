@@ -68,16 +68,16 @@ Expressions that are computable at compile-time are rewritten during this phase 
 This includes simple arithmetic expressions and relational operations that contain only constants
 as their atomic components.
 
-### Phase two - toplevel metadata
+### Phase two - top level metadata
 
-The `SemanticAnalysis.Toplevel` module parses definitions of classes, methods and toplevel functions
+The `SemanticAnalysis.TopLevel` module parses definitions of classes, methods and top level functions
 and converts them to metadata containing field and method tables of all classes and their
 inheritance hierarchies. The important jobs in this phase are:
 
 - resolving inheritance hierarchies and asserting they contain no cycles;
 - creating class method tables, taking method overriding into account;
 - analysing field, method and formal parameter names asserting there are no duplicates;
-- wrapping all toplevel functions into the special `~cl_toplevel` class.
+- wrapping all top level functions into the special `~cl_TopLevel` class.
 
 ### Phase three - sematic analysis
 

@@ -1,16 +1,17 @@
 module Espi where
 
-import           Control.Monad           (unless, when)
-import           System.Environment      (getArgs)
-import           System.Exit             (ExitCode (..), exitFailure, exitWith)
-import           System.IO               (hPutStr, hPutStrLn, stderr)
+import           Control.Monad            (when)
+import           System.Environment       (getArgs)
+import           System.Exit              (ExitCode (..), exitFailure, exitWith)
+import           System.IO                (hPutStr, hPutStrLn, stderr)
 
-import           ErrM                    (toEither)
-import           Espresso.Interpreter    (interpret)
-import           Espresso.Syntax.Abs     (Pos, Program, unwrapPos)
-import           Espresso.Syntax.Lexer   (Token)
-import           Espresso.Syntax.Parser  (myLexer, pProgram)
-import           Espresso.Syntax.Printer (Print, printTree)
+import           ErrM                     (toEither)
+import           Espresso.ControlFlow.CFG
+import           Espresso.Interpreter     (interpret)
+import           Espresso.Syntax.Abs
+import           Espresso.Syntax.Lexer    (Token)
+import           Espresso.Syntax.Parser   (myLexer, pProgram)
+import           Espresso.Syntax.Printer  (Print, printTree)
 
 type Err = Either String
 type ParseResult = (Program (Maybe Pos))
@@ -31,11 +32,6 @@ putStrErr = hPutStr stderr
 putStrErrLn :: String -> IO ()
 putStrErrLn = hPutStrLn stderr
 
-unlessM :: Monad m => m Bool -> m () -> m ()
-unlessM p a = do
-  b <- p
-  unless b a
-
 runFile :: Verbosity -> ParseFun ParseResult -> FilePath -> IO ()
 runFile v p f = readFile f >>= run v p
 
@@ -48,10 +44,15 @@ run v p s = case p ts of
       putStrErrLn err
       exitFailure
     Right tree -> do
-      let tree' = unwrapPos tree
+      let tree'@(Program a meta mthds) = unwrapPos tree
       putStrErrLn "OK"
       showTree v tree'
-      n <- interpret tree'
+      let cfgs = zip (map cfg mthds) mthds
+      showCfgs v cfgs
+      let mthds' = map (\(g, Mthd a' i _) -> Mthd a' i (linearize g)) cfgs
+          tree'' = Program a meta mthds'
+      showTree v tree''
+      n <- interpret tree''
       exitWith (if n == 0 then ExitSuccess else ExitFailure n)
   where
   ts = myLexer s
@@ -61,6 +62,13 @@ showTree v tree
  = do
       putStrV v $ "\n[Abstract Syntax]\n\n" ++ show tree
       putStrV v $ "\n[Linearized tree]\n\n" ++ printTree tree
+
+showCfgs :: Int -> [(CFG a, Method a)] -> IO ()
+showCfgs v = mapM_ showCfg
+  where
+    showCfg (g, Mthd _ (QIdent _ (SymIdent i1) (SymIdent i2)) _) = do
+      putStrV v ("CFG for " ++ i1 ++ "." ++ i2 ++ ":")
+      putStrV v $ show g
 
 usage :: IO ()
 usage = do

@@ -1,18 +1,20 @@
 module Latc where
 
-import           Control.Monad             (unless, when)
-import           System.Environment        (getArgs)
-import           System.Exit               (exitFailure, exitSuccess)
-import           System.IO                 (hPutStr, hPutStrLn, stderr)
+import           System.Environment         (getArgs)
+import           System.Exit                (exitFailure, exitSuccess)
+import           System.IO                  (hPutStr, hPutStrLn, stderr)
 
-import           ErrM                      (toEither)
-import           SemanticAnalysis.Analyser (analyse)
-import           SemanticAnalysis.Toplevel (Metadata, programMetadata)
-import           Syntax.Abs                (Pos, Program, unwrapPos)
-import           Syntax.Lexer              (Token)
-import           Syntax.Parser             (myLexer, pProgram)
-import           Syntax.Printer            (Print, printTree)
-import           Syntax.Rewriter           (rewrite)
+import           Control.Monad              (when)
+import           ErrM                       (toEither)
+import           Espresso.CodeGen.Generator (generateEspresso)
+import           Espresso.Syntax.Printer    as PrintEspresso (Print, printTree)
+import           SemanticAnalysis.Analyser  (analyse)
+import           SemanticAnalysis.TopLevel  (Metadata, programMetadata)
+import           Syntax.Abs                 (Pos, Program, unwrapPos)
+import           Syntax.Lexer               (Token)
+import           Syntax.Parser              (myLexer, pProgram)
+import           Syntax.Printer             as PrintLatte (Print, printTree)
+import           Syntax.Rewriter            (rewrite)
 
 type Err = Either String
 type ParseResult = (Program (Maybe Pos))
@@ -32,11 +34,6 @@ putStrErr = hPutStr stderr
 
 putStrErrLn :: String -> IO ()
 putStrErrLn = hPutStrLn stderr
-
-unlessM :: Monad m => m Bool -> m () -> m ()
-unlessM p a = do
-  b <- p
-  unless b a
 
 runFile :: Verbosity -> ParseFun ParseResult -> FilePath -> IO ()
 runFile v p f = readFile f >>= run v p
@@ -64,7 +61,10 @@ run v p s = case p ts of
         Right meta -> do
           showMetadata v meta
           case analyse meta of
-            Right _  -> exitSuccess
+            Right meta' -> do
+              let esp = generateEspresso meta'
+              showEspressoTree v esp
+              exitSuccess
             Left err -> do
               putStrErrLn "ERROR"
               putStrErrLn err
@@ -76,11 +76,17 @@ run v p s = case p ts of
 showMetadata :: Verbosity -> Metadata a -> IO ()
 showMetadata v meta = putStrV v $ show meta
 
-showTree :: (Show a, Print a) => Int -> a -> IO ()
+showTree :: (Show a, PrintLatte.Print a) => Int -> a -> IO ()
 showTree v tree
  = do
       putStrV v $ "\n[Abstract Syntax]\n\n" ++ show tree
-      putStrV v $ "\n[Linearized tree]\n\n" ++ printTree tree
+      putStrV v $ "\n[Linearized tree]\n\n" ++ PrintLatte.printTree tree
+
+showEspressoTree :: (Show a, PrintEspresso.Print a) => Int -> a -> IO ()
+showEspressoTree v tree
+ = do
+      putStrV v $ "\n[Abstract Syntax]\n\n" ++ show tree
+      putStrV v $ "\n[Linearized tree]\n\n" ++ PrintEspresso.printTree tree
 
 usage :: IO ()
 usage = do

@@ -53,34 +53,34 @@ rewriteStmt stmt =
     Decr _ i          -> Decr code i
     Ret _ expr        -> Ret code (rewriteExpr expr)
     VRet _            -> VRet code
-    Cond _ expr stmt  -> Cond code (rewriteExpr expr) (blkWrap $ rewriteStmt stmt)
+    Cond _ expr stmt'  -> Cond code (rewriteExpr expr) (blkWrap $ rewriteStmt stmt')
     CondElse _ expr stmt1 stmt2 -> CondElse code (rewriteExpr expr) (blkWrap $ rewriteStmt stmt1) (blkWrap $ rewriteStmt stmt2)
-    While _ expr stmt -> While code (rewriteExpr expr) (blkWrap $ rewriteStmt stmt)
-    For _ t i expr stmt -> let expr' = rewriteExpr expr
-                               stmt' = rewriteStmt stmt
-                               t'    = rewriteType t
-                               exprCode = unwrap expr'
-                               stmtCode = unwrap stmt'
-                               tCode    = unwrap t'
-                               arrDecl = Decl exprCode (Var exprCode) [Init exprCode forArrayIdent expr']
-                               idxDecl = Decl exprCode (Int exprCode) [Init exprCode forIndexIdent (ELitInt exprCode 0)]
-                               arrVar = EVar exprCode forArrayIdent
-                               idxVar = EVar exprCode forIndexIdent
-                               lenExpr = EAcc exprCode arrVar arrayLengthIdent
-                               whileGuard = ERel exprCode idxVar (LTH exprCode) lenExpr
-                               arrAccess = EIdx exprCode arrVar idxVar
-                               elemDecl = Decl tCode t' [Init tCode i arrAccess]
-                               idxIncr = Incr exprCode forIndexIdent
-{- {                      -}   in BStmt stmtCode $ Block stmtCode [
-{-  var ~l_arr = <expr>; -}            arrDecl,
-{-  int ~l_idx = 0;      -}            idxDecl,
-{-  while(~l_idx < ~l_arr.length)-}    While stmtCode whileGuard $
-{-  {                         -}       BStmt stmtCode $ Block stmtCode [
-{-   <t> <i> = ~l_arr[~l_idx];-}               elemDecl,
-{-   <stmt>                   -}               stmt',
-{-   ~l_idx++;                -}               idxIncr
-{-  }                         -}           ]
-{- }                      -}           ]
+    While _ expr stmt' -> While code (rewriteExpr expr) (blkWrap $ rewriteStmt stmt')
+    For _ t i expr stmt' -> let expr' = rewriteExpr expr
+                                stmt'' = rewriteStmt stmt'
+                                t'    = rewriteType t
+                                exprCode = unwrap expr'
+                                stmtCode = unwrap stmt''
+                                tCode    = unwrap t'
+                                arrDecl = Decl exprCode (Var exprCode) [Init exprCode forArrayIdent expr']
+                                idxDecl = Decl exprCode (Int exprCode) [Init exprCode forIndexIdent (ELitInt exprCode 0)]
+                                arrVar = EVar exprCode forArrayIdent
+                                idxVar = EVar exprCode forIndexIdent
+                                lenExpr = EAcc exprCode arrVar arrayLengthIdent
+                                whileGuard = ERel exprCode idxVar (LTH exprCode) lenExpr
+                                arrAccess = EIdx exprCode arrVar idxVar
+                                elemDecl = Decl tCode t' [Init tCode i arrAccess]
+                                idxIncr = Incr exprCode forIndexIdent
+{- {                      -}    in BStmt stmtCode $ Block stmtCode [
+{-  var ~l_arr = <expr>; -}             arrDecl,
+{-  int ~l_idx = 0;      -}             idxDecl,
+{-  while(~l_idx < ~l_arr.length)-}     While stmtCode whileGuard $
+{-  {                         -}        BStmt stmtCode $ Block stmtCode [
+{-   <t> <i> = ~l_arr[~l_idx];-}                elemDecl,
+{-   <stmt>                   -}                stmt'',
+{-   ~l_idx++;                -}                idxIncr
+{-  }                         -}            ]
+{- }                      -}            ]
     SExp _ expr       -> SExp code (rewriteExpr expr)
 
 -- Wrap a single statement into a block.
@@ -101,26 +101,26 @@ rewriteExpr :: Expr Pos -> Expr Code
 rewriteExpr expr =
     let code = toCode expr
         expr' = case expr of
-            EVar _ i         -> EVar code i
-            ELitInt _ n      -> ELitInt code n
-            EString _ s      -> EString code s
-            ELitTrue _       -> ELitTrue code
-            ELitFalse _      -> ELitFalse code
-            ENullI _ i       -> ENull code (Cl code i)
-            ENullArr _ i     -> ENull code (Arr code (Cl code i))
-            ENull _ type_    -> ENull code (rewriteType type_)
-            ENew _ t         -> ENew code (rewriteType t)
-            ENewArr _ t expr -> ENewArr code (rewriteType t) (rewriteExpr expr)
-            EApp _ expr exprs -> EApp code (rewriteExpr expr) (map rewriteExpr exprs)
-            EIdx _ expr1 expr2 -> EIdx code (rewriteExpr expr1) (rewriteExpr expr2)
-            EAcc _ expr i    -> EAcc code (rewriteExpr expr) i
-            ENeg _ expr      -> ENeg code (rewriteExpr expr)
-            ENot _ expr      -> ENot code (rewriteExpr expr)
+            EVar _ i            -> EVar code i
+            ELitInt _ n         -> ELitInt code n
+            EString _ s         -> EString code s
+            ELitTrue _          -> ELitTrue code
+            ELitFalse _         -> ELitFalse code
+            ENullI _ i          -> ENull code (Cl code i)
+            ENullArr _ i        -> ENull code (Arr code (Cl code i))
+            ENull _ type_       -> ENull code (rewriteType type_)
+            ENew _ t            -> ENew code (rewriteType t)
+            ENewArr _ t expr''  -> ENewArr code (rewriteType t) (rewriteExpr expr'')
+            EApp _ expr'' exprs -> EApp code (rewriteExpr expr'') (map rewriteExpr exprs)
+            EIdx _ expr1 expr2  -> EIdx code (rewriteExpr expr1) (rewriteExpr expr2)
+            EAcc _ expr'' i     -> EAcc code (rewriteExpr expr'') i
+            ENeg _ expr''       -> ENeg code (rewriteExpr expr'')
+            ENot _ expr''       -> ENot code (rewriteExpr expr'')
             EMul _ expr1 op expr2 -> EMul code (rewriteExpr expr1) (nullRewrite op) (rewriteExpr expr2)
             EAdd _ expr1 op expr2 -> EAdd code (rewriteExpr expr1) (nullRewrite op) (rewriteExpr expr2)
             ERel _ expr1 op expr2 -> ERel code (rewriteExpr expr1) (nullRewrite op) (rewriteExpr expr2)
-            EAnd _ expr1 expr2 -> EAnd code (rewriteExpr expr1) (rewriteExpr expr2)
-            EOr _ expr1 expr2 -> EOr code (rewriteExpr expr1) (rewriteExpr expr2)
+            EAnd _ expr1 expr2  -> EAnd code (rewriteExpr expr1) (rewriteExpr expr2)
+            EOr _ expr1 expr2   -> EOr code (rewriteExpr expr1) (rewriteExpr expr2)
     in  calcConstexpr expr'
 
 -- Calculate the value of an expression containing only constants or trivial cases as leaves.
@@ -167,6 +167,7 @@ calcConstexpr srcExpr = case srcExpr of
         (ENull {}, ENull {}) -> case op of
             EQU _ -> ELitTrue code
             NE _  -> ELitFalse code
+            _     -> srcExpr
         _                        -> srcExpr
     EAnd code expr1 expr2 -> case (expr1, expr2) of
         (ELitTrue _, ELitTrue _)   -> ELitTrue code

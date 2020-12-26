@@ -4,8 +4,9 @@ entrypoints Program ;
 token SymIdent (letter | '~') (letter | digit | '_' | '\'')* ;
 
 token LabIdent '.' 'L' '_' (letter | digit | '_' | '\'')* ;
-token ValIdent '%' 'v' '_' (letter | digit | '_' | '\'')* ;
-token ArgIdent '%' 'a' '_' (letter | digit | '_' | '\'')* ;
+
+-- Values are %v_x, arguments are %a_x.
+token ValIdent '%' ('v' | 'a') '_' (letter | digit | '_' | '\'')* ;
 
 QIdent. QIdent ::= SymIdent "." SymIdent ;
 
@@ -40,10 +41,12 @@ Mthd. Method ::= ".method " QIdent ":" "[" [Instr] "]" ;
 separator Method "" ;
 
 ILabel.    Instr ::= LabIdent ":" ;
-ILabelAnn. Instr ::= LabIdent ":" "--" "lines" Integer "-" Integer "chars" Integer "-" Integer ;
+ILabelAnn. Instr ::= LabIdent ":" "/*" "lines" Integer "to" Integer "*/" ;
 IVRet.     Instr ::= "return" ";" ;
 IRet.      Instr ::= "return" Val ";" ;
 IOp.       Instr ::= ValIdent ":=" Val Op Val ";" ;
+ISet.      Instr ::= ValIdent ":=" Val ";" ;
+IUnOp.     Instr ::= ValIdent ":=" UnOp Val ";" ;
 IVCall.    Instr ::= Call ";" ;
 ICall.     Instr ::= ValIdent ":=" Call ";" ;
 IJmp.      Instr ::= "jump" LabIdent ";" ;
@@ -64,12 +67,12 @@ separator Val "," ;
 separator PhiVariant "," ;
 
 VInt.   Val ::= Integer ;
+VNegInt. Val ::= "-" Integer ;
 VStr.   Val ::= String ;
 VTrue.  Val ::= "true" ;
 VFalse. Val ::= "false" ;
 VNull.  Val ::= "null" ;
 VVal.   Val ::= ValIdent ;
-VArg.   Val ::= ArgIdent ;
 
 OpAdd. Op ::= "+" ;
 OpSub. Op ::= "-" ;
@@ -84,6 +87,9 @@ OpEQU. Op ::= "==" ;
 OpNE.  Op ::= "!=" ;
 OpAnd. Op ::= "&" ;
 OpOr.  Op ::= "|" ;
+
+UnOpNeg. UnOp ::= "-" ;
+UnOpNot. UnOp ::= "!" ;
 
 comment "//" ;
 comment "/*" "*/" ;

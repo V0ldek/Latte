@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 01e877666fe4fcde97886f0608c0f96b01b6576a30938f382c4f0767141c388d
+-- hash: e9616c871b8c1af3b115a392c3ed19f0798d94b2279135bcdfe17c7a4235997b
 
 name:           Latte
 version:        0.9.0.0
@@ -29,6 +29,8 @@ library
   exposed-modules:
       ErrM
       Error
+      Espresso.CodeGen.Generator
+      Espresso.ControlFlow.CFG
       Espresso.Interpreter
       Espresso.Syntax.Abs
       Espresso.Syntax.Lexer
@@ -39,17 +41,19 @@ library
       SemanticAnalysis.Analyser
       SemanticAnalysis.Class
       SemanticAnalysis.ControlFlow
-      SemanticAnalysis.Toplevel
+      SemanticAnalysis.TopLevel
       Syntax.Abs
       Syntax.Code
       Syntax.Lexer
       Syntax.Parser
       Syntax.Printer
       Syntax.Rewriter
+      Utilities
   other-modules:
       Paths_Latte
   hs-source-dirs:
       src
+  ghc-options: -Wall -fno-warn-type-defaults
   build-depends:
       array >=0.5 && <0.6
     , base >=4.7 && <5
@@ -105,6 +109,7 @@ test-suite Latte-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Espresso.GeneratorSpec
       Espresso.InterpreterSpec
       SemanticAnalysis.AcceptanceSpec
       Paths_Latte

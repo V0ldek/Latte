@@ -23,6 +23,7 @@ import           Error         (lineInfo)
 import           Identifiers
 import           Syntax.Abs
 import           Syntax.Code
+import           Utilities
 
 data Class a = Class { clName :: Ident, clBase :: Maybe (Class a), clFields :: [Field], clMethods :: [Method a] }
 
@@ -74,7 +75,7 @@ clCons name base flds mthds = do
 fldCons :: Type a -> Ident -> ClDef Code -> Field
 fldCons typ i = Fld i (() <$ typ)
 
--- Construct a method representing a toplevel function from its constituents.
+-- Construct a method representing a top level function from its constituents.
 -- Checks parameter naming rules.
 funCons :: Type a -> Ident -> [Arg Code] -> TopDef Code -> Either String (Method Code)
 funCons typ i args def = do
@@ -90,7 +91,7 @@ mthdCons typ i selfTyp args def = do
     cons <- baseMethodCons typ i (Just selfTyp) args
     return $ cons blk (unwrap def)
 
--- Common constructor for both toplevel functions and class methods.
+-- Common constructor for both top level functions and class methods.
 baseMethodCons :: Type a -> Ident -> Maybe (Type b) -> [Arg Code] -> Either String (Block Code -> Code -> Method Code)
 baseMethodCons typ i selfTyp args = do
     let dupArgs = fst $ findDupsBy (\(Arg _ _ i) -> showI i) args
@@ -151,37 +152,6 @@ showType typ = case typ of
     Cl _ (Ident name) -> name
     Fun _ typ typs    -> showType typ ++ "(" ++ intercalate ", " (map showType typs) ++ ")"
     Ref _ t           -> showType t
-
--- Find duplicates in a given list based on a key selector.
--- Returns a deduplicated list of duplicated keys and a list of values such that
--- there exists a value with the same key.
-findDupsBy :: Ord k => (a -> k) -> [a] -> ([k], [a])
-findDupsBy f ds = collect $ foldr checkForDup (Map.empty, []) ds
-    where
-    checkForDup a (m, dups) =
-        let k = f a
-        in  if Map.member k m then (m, (k, a) : dups) else (Map.insert k a m, dups)
-    collect (m, dups) =
-        let (ks, as) = unzip dups in (ks, foldr (\k as' -> m Map.! k : as') as ks)
-
--- Inner join based on a key selector of two lists.
--- Returns a deduplicated list of keys that participated in a join
--- and the list of resulting products.
-findConflictsBy :: Ord k => (a -> k) -> (b -> k) -> [a] -> [b] -> ([k], [(a, b)])
-findConflictsBy fa fb as bs = unzip $ foldr checkForConfl [] bs
-    where
-    m = Map.fromList $ zip (map fa as) as
-    checkForConfl b confls =
-        let k = fb b
-        in  case Map.lookup k m of
-                Nothing -> confls
-                Just a  -> (k, (a, b)) : confls
-
--- O(nlogn) deduplication.
-dedup :: Ord a => [a] -> [a]
-dedup xs = run (sort xs)
-    where run []     = []
-          run (x:xs) = x : run (dropWhile (== x) xs )
 
 -- Errors
 

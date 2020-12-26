@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 -- Semantic static analysis rejecting incorrect programs and adding type annotations to the program tree.
-module SemanticAnalysis.Analyser (analyse, SemData (..), Symbol (..), SymbolTable (..)) where
+module SemanticAnalysis.Analyser (analyse, SemData (..), Symbol (..), SymbolTable (..), symTabLookup) where
 
 import           Control.Monad.Reader
 import           Control.Monad.State
@@ -11,10 +11,11 @@ import qualified Error
 import           Identifiers
 import           SemanticAnalysis.Class
 import           SemanticAnalysis.ControlFlow
-import           SemanticAnalysis.Toplevel    (Metadata (..))
+import           SemanticAnalysis.TopLevel    (Metadata (..))
 import           Syntax.Abs
 import           Syntax.Code
 import           Syntax.Printer               (Print, printTree)
+import           Utilities
 
 -- Tree of symbol tables representing the scoped declarations.
 data SymbolTable = SymTab {symTab :: Map.Map Ident Symbol, symParent :: Maybe SymbolTable}
@@ -87,8 +88,8 @@ analyseCl cl = do
 -- analyseCl lifted with Nothing coalescing.
 mbAnalyseCl :: Maybe (Class Code) -> AnalyserM (Maybe (Class SemData))
 mbAnalyseCl cl = case cl of
-  Nothing -> return Nothing
-  Just cl -> Just <$> analyseCl cl
+  Nothing  -> return Nothing
+  Just cl' -> Just <$> analyseCl cl'
 
 -- Analyse a given method metadata. Assumes that its enclosing class was entered with enterCl.
 analyseMthd :: Method Code -> AnalyserM (Method SemData)
@@ -234,14 +235,14 @@ analyseStmt stmt = do
       semData <- analyseVoid stmt
       unreachable -- Code after a return statement is always unreachable.
       return $ VRet semData
-    Cond _ expr stmt -> do
+    Cond _ expr stmt' -> do
       expr' <- analyseExpr expr
       let condType = semType $ unwrap expr'
-      unlessM (condType `typeMatch` Bool ()) (invTypeError stmt (Bool ()) condType)
+      unlessM (condType `typeMatch` Bool ()) (invTypeError stmt' (Bool ()) condType)
       triviallyTrue <- isTriviallyTrue expr'
-      stmt' <- (if triviallyTrue then mustEnter else mayEnter) (analyseStmt stmt)
-      semData <- analyseVoid stmt
-      return $ Cond semData expr' stmt'
+      stmt'' <- (if triviallyTrue then mustEnter else mayEnter) (analyseStmt stmt')
+      semData <- analyseVoid stmt'
+      return $ Cond semData expr' stmt''
     CondElse _ expr stmt1 stmt2 -> do
       expr' <- analyseExpr expr
       let condType = semType $ unwrap expr'
@@ -255,14 +256,14 @@ analyseStmt stmt = do
       (stmt1', stmt2') <- analyser (analyseStmt stmt1) (analyseStmt stmt2)
       semData <- analyseVoid stmt
       return $ CondElse semData expr' stmt1' stmt2'
-    While _ expr stmt -> do
+    While _ expr stmt' -> do
       expr' <- analyseExpr expr
       let condType = semType $ unwrap expr'
-      unlessM (condType `typeMatch` Bool ()) (invTypeError stmt (Bool ()) condType)
+      unlessM (condType `typeMatch` Bool ()) (invTypeError stmt' (Bool ()) condType)
       triviallyTrue <- isTriviallyTrue expr'
-      stmt' <- (if triviallyTrue then mustEnter else mayEnter) (analyseStmt stmt)
-      semData <- analyseVoid stmt
-      return $ While semData expr' stmt'
+      stmt'' <- (if triviallyTrue then mustEnter else mayEnter) (analyseStmt stmt')
+      semData <- analyseVoid stmt'
+      return $ While semData expr' stmt''
     For {} -> error "For should be rewritten before analysis."
     SExp _ expr -> do
       expr' <- analyseExpr expr
@@ -276,24 +277,24 @@ analyseItemDecl t item = do
   mbSym <- getsSym (symTabLocalScopeLookup i)
   case mbSym of
     Nothing -> case item of
-      NoInit _ i -> do
+      NoInit _ i' -> do
         when (isVar t) (varNoInitError item)
-        addSym (Sym i (Ref () t) (Just $ unwrap item))
+        addSym (Sym i' (Ref () t) (Just $ unwrap item))
         semData <- analyseVoid item
-        return $ NoInit semData i
-      Init _ i expr -> do
+        return $ NoInit semData i'
+      Init _ i' expr -> do
         expr' <- analyseExpr expr
         let exprType = semType $ unwrap expr'
             t' = if isVar t then exprType else t -- Infer type to the compile-time type of the expression.
         unlessM (exprType `typeMatch` t) (invTypeError expr' t exprType)
-        addSym (Sym i (Ref () t') (Just $ unwrap item))
+        addSym (Sym i' (Ref () t') (Just $ unwrap item))
         semData <- analyseVoid item
-        return $ Init semData i expr'
+        return $ Init semData i' expr'
     Just sym -> conflDeclError item sym
   where
     i = case item of
-      NoInit _ i -> i
-      Init _ i _ -> i
+      NoInit _ i' -> i'
+      Init _ i' _ -> i'
 
 analyseExpr :: Expr Code -> AnalyserM (Expr SemData)
 analyseExpr srcExpr = case srcExpr of
@@ -459,9 +460,9 @@ analyseVoid x = analyseTyped x (Void ())
 -- Annotate the piece of syntax with semantic data according to current state and the given type.
 analyseTyped :: Unwrappable f => f Code -> Type () -> AnalyserM SemData
 analyseTyped x t = do
-  symTab <- getSym
+  syms <- getSyms
   reach <- getReach
-  let semData = SemData symTab t (Just $ unwrap x) reach
+  let semData = SemData syms t (Just $ unwrap x) reach
   return semData
 
 getsCls :: (ClassStore -> a) -> AnalyserM a
@@ -470,8 +471,8 @@ getsCls f = gets (f . stClasses)
 getsSym :: (SymbolTable -> a) -> AnalyserM a
 getsSym f = gets (f . stSymTab)
 
-getSym :: AnalyserM SymbolTable
-getSym = getsSym id
+getSyms :: AnalyserM SymbolTable
+getSyms = getsSym id
 
 -- Set reachability state to unreachable.
 unreachable :: AnalyserM ()
@@ -506,10 +507,6 @@ addSyms syms = modifySym (symTabUnion $ Map.fromList $ map (\s -> (symName s, s)
 addSym :: Symbol -> AnalyserM ()
 addSym sym = modifySym (symTabInsert sym)
 
--- Remove a symbol with the given identifier from the current symbol table.
-removeSym :: Ident -> AnalyserM ()
-removeSym i = modifySym (symTabRemove i)
-
 symTabUnion :: Map.Map Ident Symbol -> SymbolTable -> SymbolTable
 symTabUnion x s =
   let y = symTab s
@@ -518,10 +515,6 @@ symTabUnion x s =
 -- Add the given symbol to the given symbol table.
 symTabInsert :: Symbol -> SymbolTable -> SymbolTable
 symTabInsert sym s = s {symTab = Map.insert (symName sym) sym (symTab s)}
-
--- Remove a symbol with the given identifier from the given symbol table.
-symTabRemove :: Ident -> SymbolTable -> SymbolTable
-symTabRemove i s = s {symTab = Map.delete i (symTab s)}
 
 -- Get a given symbol from the symbol table stack, recursivelly.
 symTabGet :: Ident -> SymbolTable -> Symbol
@@ -567,9 +560,9 @@ isVoid t = case deref t of
 
 isVar :: Type a -> Bool
 isVar t = case deref t of
-  Var _   -> True
-  Arr _ t -> isVar t
-  _       -> False
+  Var _    -> True
+  Arr _ t' -> isVar t'
+  _        -> False
 
 -- Can an expression of type t1 be used in a place where the type t2 is required.
 -- Both types are dereferenced, so Ref has no impact on the result.
@@ -640,10 +633,10 @@ accessMember t i ctx = case t of
       Just cl -> let fld = find (\f -> fldName f == i) (clFields cl)
                      mthd = find (\m -> mthdName m == i) (clMethods cl)
                  in case (fld, mthd) of
-                      (Just fld, _)      -> return $ fldToSym fld
-                      (_, Just mthd)     -> return $ mthdToSym mthd
+                      (Just fld', _)     -> return $ fldToSym fld'
+                      (_, Just mthd')    -> return $ mthdToSym mthd'
                       (Nothing, Nothing) -> invAccessError t i ctx
-  Ref _ t -> accessMember t i ctx
+  Ref _ t' -> accessMember t' i ctx
   _       -> invAccessError t i ctx
 
 isRef :: Type a -> Bool
@@ -658,20 +651,15 @@ isRef t = case t of
 -- So, for example, a type `int&[]&` should be impossible.
 deref :: Type a -> Type a
 deref t = case t of
-  Ref _ t -> deref t
-  _       -> t
-
-unlessM :: Monad m => m Bool -> m () -> m ()
-unlessM p a = do
-  b <- p
-  unless b a
+  Ref _ t' -> deref t'
+  _        -> t
 
 -- Symbols that are linked from the native library.
 nativeTopLevelSymbols :: [Symbol]
-nativeTopLevelSymbols = [printInt, printString, error, readInt, readString]
+nativeTopLevelSymbols = [printInt, printString, error_, readInt, readString]
     where printInt = Sym (Ident "printInt") (Fun () (Void ()) [Int ()]) Nothing
           printString = Sym (Ident "printString") (Fun () (Void ()) [Str ()]) Nothing
-          error = Sym (Ident "error") (Fun () (Void ()) []) Nothing
+          error_ = Sym (Ident "error") (Fun () (Void ()) []) Nothing
           readInt = Sym (Ident "readInt") (Fun () (Int ()) []) Nothing
           readString = Sym (Ident "readString") (Fun () (Str ()) []) Nothing
 

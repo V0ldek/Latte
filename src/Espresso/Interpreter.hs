@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes        #-}
+{-# OPTIONS_GHC -fno-warn-unused-binds #-}
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
 module Espresso.Interpreter (interpret) where
 
 import           Control.Monad.Reader
@@ -20,7 +22,7 @@ type Store = Map.Map Loc Object
 data Env = Env { objEnv :: OEnv, clEnv :: CEnv, labelEnv :: LEnv }
 
 data Object = Inst { objType_ :: Class, objData_ :: OEnv }
-            | Arr  { arrType_ :: Class, arrData_ :: [Object]}
+            | Array  { arrType_ :: Class, arrData_ :: [Object]}
             | Ptr   { ref :: Loc }
             | PInt Int
             | PBool Bool
@@ -30,7 +32,7 @@ data Object = Inst { objType_ :: Class, objData_ :: OEnv }
 data Class = Class { clName :: String, clFlds :: Map.Map String Field, clMthds :: Map.Map String Function }
 
 data Field = Fld { fldName :: String, fldType :: SType () }
-data Function = Fun { funName :: String, funRet :: SType (), funParams :: [SType ()], code :: [Instr Pos] }
+data Function = Fun { funName :: String, funRet :: SType (), funParams :: [SType ()], funCode :: [Instr Pos] }
 
 type InterpreterM m = StateT Store (ReaderT Env m)
 
@@ -40,18 +42,6 @@ instance (Monad m, LatteIO m) => LatteIO (InterpreterM m) where
     error = lift $ lift LatteIO.error
     printInt n = lift $ lift $ printInt n
     printString s = lift $ lift $ printString s
-
-instance ToString LabIdent where
-    toStr (LabIdent s) = s
-
-instance ToString SymIdent where
-    toStr (SymIdent s) = s
-
-instance ToString ValIdent where
-    toStr (ValIdent s) = s
-
-instance ToString ArgIdent where
-    toStr (ArgIdent s) = s
 
 interpret :: (LatteIO m, Monad m) => Program Pos -> m Int
 interpret (Program _ (Meta _ clDefs) methods) = do
@@ -67,32 +57,34 @@ interpret (Program _ (Meta _ clDefs) methods) = do
                                                      mthdMap = Map.fromList $ zip (map funName mthds) mthds
                                                  in Class (toStr i) fldMap mthdMap
         fldDefToFld (FldDef _ t i) = Fld (toStr i) (() <$ t)
-        mthdDefToFun (MthdDef _ (FType _ r ps) qi) = let QIdent _ cli i = qi
-                                                     in  if isNativeFun (toStr cli) (toStr i) then Nothing else
-                                                     let Mthd _ _ code = case Map.lookup (cli, i) methodMap of
-                                                                            Nothing -> Prelude.error $ "internal error, method " ++ toStr cli ++ "." ++ toStr i ++ " not found"
-                                                                            Just m  -> m
-                                                     in  Just $ Fun (toStr i) (() <$ r) (map (() <$) ps) code
+        mthdDefToFun (MthdDef _ (FType _ r ps) qi) =
+            let QIdent _ cli i = qi
+            in  if isNativeFun (toStr cli) (toStr i)
+                    then Nothing
+                    else let Mthd _ _ code = case Map.lookup (cli, i) methodMap of
+                                Nothing -> Prelude.error $ "internal error, method " ++ toStr cli ++ "." ++ toStr i ++ " not found"
+                                Just m  -> m
+                         in  Just $ Fun (toStr i) (() <$ r) (map (() <$) ps) code
         methodMap = Map.fromList $ zip (map (\(Mthd _ (QIdent _ cli i) _) -> (cli, i)) methods) methods
         go = do
             main <- askFun (toStr topLevelClassIdent) (toStr mainSymIdent)
             call main [] return
 
 call :: (LatteIO m, Monad m) => Function -> [Object] -> (Object -> InterpreterM m a) -> InterpreterM m a
-call (Fun i r ps code) objs ret = do
+call (Fun _ _ _ code) objs ret = do
     argEnv <- allocs args
     let labels = getLabels code
     ret' <- saveEnv2 ret
-    localObjs argEnv $ localLabels labels $ execute entryLabel entryLabel code ret'
+    localObjs argEnv $ localLabels labels $ execute (toStr entryLabel) (toStr entryLabel) code ret'
     where
         args = zipWith (\i p -> ("%a_" ++ show i, p)) [0..] objs
 
 getLabels :: [Instr Pos] -> [(String, [Instr Pos])]
 getLabels [] = []
 getLabels (i : is) = case i of
-    ILabel _ i            -> (toStr i, is) : getLabels is
-    ILabelAnn _ i _ _ _ _ -> (toStr i, is) : getLabels is
-    _                     -> getLabels is
+    ILabel _ l        -> (toStr l, is) : getLabels is
+    ILabelAnn _ l _ _ -> (toStr l, is) : getLabels is
+    _                 -> getLabels is
 
 callFromCallsite :: (LatteIO m, Monad m) => Call Pos -> (Object -> InterpreterM m a) -> InterpreterM m a
 callFromCallsite callsite ret = case callsite of
@@ -101,13 +93,13 @@ callFromCallsite callsite ret = case callsite of
         if isNativeFun (toStr i1) (toStr i2) then runNative (toStr i2) vals ret else (do
             f <- askFun (toStr i1) (toStr i2)
             call f args ret)
-    CallVirt _ qi vals -> printString "callvirt unimplemented" >> LatteIO.error
+    CallVirt {} -> printString "callvirt unimplemented" >> LatteIO.error
 
 execute :: (LatteIO m, Monad m) => String -> String -> [Instr Pos] -> (Object -> InterpreterM m a) -> InterpreterM m a
-execute prevLabel currLabel [] ret = ret PNull
-execute prevLabel currLabel (i : is) ret = case i of
+execute _ _ [] ret = ret PNull
+execute prevLabel currLabel (instr : is) ret = case instr of
     ILabel _ i   -> execute currLabel (toStr i) is ret
-    ILabelAnn _ i _ _ _ _ -> execute currLabel (toStr i) is ret
+    ILabelAnn _ i _ _ -> execute currLabel (toStr i) is ret
     IVRet {}     -> ret PNull
     IRet _ v     -> do
         x <- getVal v
@@ -116,40 +108,49 @@ execute prevLabel currLabel (i : is) ret = case i of
         x1 <- getVal v1
         x2 <- getVal v2
         let res = performOp x1 x2 op
-        newval <- alloc (toStr i) res
+        newval <- store (toStr i) res
+        localObj newval $ execute prevLabel currLabel is ret
+    ISet _ i v -> do
+        x <- getVal v
+        newval <- store (toStr i) x
+        localObj newval $ execute prevLabel currLabel is ret
+    IUnOp _ i op v -> do
+        x <- getVal v
+        let res = performUnOp x op
+        newval <- store (toStr i) res
         localObj newval $ execute prevLabel currLabel is ret
     IVCall _ callsite -> callFromCallsite callsite (\_ -> execute prevLabel currLabel is ret)
     ICall _ i callsite -> callFromCallsite callsite (\res -> do
-        newval <- alloc (toStr i) res
+        newval <- store (toStr i) res
         localObj newval $ execute prevLabel currLabel is ret)
     IJmp _ i -> do
-        is <- askLabel (toStr i)
-        execute currLabel (toStr i) is ret
+        is' <- askLabel (toStr i)
+        execute currLabel (toStr i) is' ret
     ICondJmp _ v i1 i2 -> do
         x1 <- getVal v
         is1 <- askLabel (toStr i1)
         is2 <- askLabel (toStr i2)
         b <- isTrue x1
-        let (label, is) = if b
+        let (label, is') = if b
             then (toStr i1, is1)
             else (toStr i2, is2)
-        execute currLabel label is ret
+        execute currLabel label is' ret
     ILoad _ i v -> do
         x <- getVal v
         x' <- deref x
-        newval <- alloc (toStr i) x'
+        newval <- store (toStr i) x'
         localObj newval $ execute prevLabel currLabel is ret
     IStore _ v1 v2 -> do
         x1 <- getVal v1
         x2 <- getVal v2
         storeInto x1 x2
         execute prevLabel currLabel is ret
-    IFld _ i v (QIdent _ q1 q2) -> printString "fields unimplemented" >> LatteIO.error
-    IArr _ i v idx -> printString "arrays unimplemented" >> LatteIO.error
+    IFld {} -> printString "fields unimplemented" >> LatteIO.error
+    IArr {} -> printString "arrays unimplemented" >> LatteIO.error
     IPhi _ i variants -> do
-        let Just (PhiVar _ _ val) = find (\(PhiVar _ i _) -> toStr i == prevLabel) variants
+        let Just (PhiVar _ _ val) = find (\(PhiVar _ l _) -> toStr l == prevLabel) variants
         obj <- getVal val
-        newval <- alloc (toStr i) obj
+        newval <- store (toStr i) obj
         localObj newval $ execute prevLabel currLabel is ret
 
 askFun :: (LatteIO m, Monad m) => String -> String -> InterpreterM m Function
@@ -185,7 +186,14 @@ allocs = mapM (uncurry alloc)
 
 alloc :: (LatteIO m, Monad m) => String -> Object -> InterpreterM m (String, Loc)
 alloc i obj = do
-    loc <- maxLoc
+    loc <- newloc
+    storeObj loc obj
+    return (i, loc)
+
+store :: (LatteIO m, Monad m) => String -> Object -> InterpreterM m (String, Loc)
+store i obj = do
+    mbloc <- asks (Map.lookup i . objEnv)
+    loc <- maybe newloc return mbloc
     storeObj loc obj
     return (i, loc)
 
@@ -195,30 +203,31 @@ storeObj loc obj = modify $ Map.insert loc obj
 storeInto :: (LatteIO m, Monad m) => Object -> Object -> InterpreterM m ()
 storeInto to obj = case to of
     Ptr loc -> modify $ Map.insert loc obj
+    _       -> Prelude.error "internal error, invalid store"
 
 getVal :: (LatteIO m, Monad m) => Val a -> InterpreterM m Object
 getVal val = case val of
-    VInt _ n -> return $ PInt (fromInteger n)
-    VStr _ s -> return $ PStr s
-    VTrue _  -> return $ PBool True
-    VFalse _ -> return $ PBool False
-    VNull _  -> return PNull
-    VVal _ i -> getObj (toStr i)
-    VArg _ i -> getObj (toStr i)
+    VInt _ n    -> return $ PInt (fromInteger n)
+    VNegInt _ n -> return $ PInt (fromInteger (-n))
+    VStr _ s    -> return $ PStr s
+    VTrue _     -> return $ PBool True
+    VFalse _    -> return $ PBool False
+    VNull _     -> return PNull
+    VVal _ i    -> getObj (toStr i)
 
 getObj :: (LatteIO m, Monad m) => String -> InterpreterM m Object
 getObj i = do
     ptr <- askObj i
     deref (Ptr ptr)
 
-maxLoc :: (LatteIO m, Monad m) => InterpreterM m Int
-maxLoc = do
+newloc :: (LatteIO m, Monad m) => InterpreterM m Int
+newloc = do
     objs <- get
     if Map.null objs then return 0
     else let (k, _) = Map.findMax objs in return $ k + 1
 
 localObjs :: (LatteIO m, Monad m) => [(String, Loc)] -> InterpreterM m a -> InterpreterM m a
-localObjs objs = local (\e -> e { objEnv = Map.union (Map.fromList objs) $ objEnv e })
+localObjs objs = local (\e -> e { objEnv = Map.fromList objs })
 
 localObj :: (LatteIO m, Monad m) => (String, Loc) -> InterpreterM m a -> InterpreterM m a
 localObj (i, ptr) = local (\e -> e { objEnv = Map.insert i ptr $ objEnv e })
@@ -238,6 +247,7 @@ deref x = case x of
         case mbobj of
             Nothing  -> printString ("internal error, pointer " ++ show loc ++ " not found") >> LatteIO.error
             Just obj -> return obj
+    _       -> Prelude.error "internal error, invalid deref"
 
 isTrue :: (LatteIO m, Monad m) => Object -> InterpreterM m Bool
 isTrue x = case x of
@@ -262,6 +272,12 @@ performOp x1 x2 op = case (x1, x2, op) of
     (_, _, OpLTH {})               -> PBool $ getOrd x1 x2 op
     _                              -> Prelude.error (show op)
 
+performUnOp :: Object -> UnOp Pos -> Object
+performUnOp x op = case (x, op) of
+    (PInt n, UnOpNeg {})  -> PInt $ -n
+    (PBool b, UnOpNot {}) -> PBool $ not b
+    _                     -> Prelude.error (show op)
+
 areEq :: Object -> Object -> Bool
 areEq x1 x2 = case (x1, x2) of
     (PInt n1, PInt n2)   -> n1 == n2
@@ -276,12 +292,14 @@ getOrd x1 x2 op = case (x1, x2) of
     (PInt n1, PInt n2)   -> ordWithOp n1 n2
     (PStr s1, PStr s2)   -> ordWithOp s1 s2
     (PBool b1, PBool b2) -> ordWithOp b1 b2
+    _                    -> Prelude.error $ "invalid ord of " ++ show x1 ++ ", " ++ show x2
     where
-        ordWithOp x1 x2 = case op of
-                OpGTH {} -> x1 >= x2
-                OpGE {}  -> x1 > x2
-                OpLTH {} -> x1 < x2
-                OpLE {}  -> x1 <= x2
+        ordWithOp x1' x2' = case op of
+                OpGTH {} -> x1' > x2'
+                OpGE {}  -> x1' >= x2'
+                OpLTH {} -> x1' < x2'
+                OpLE {}  -> x1' <= x2'
+                _        -> Prelude.error $ "internal error, invalid relop " ++ show op
 
 isNativeFun :: String -> String -> Bool
 isNativeFun i1 i2 = i1 == toStr topLevelClassIdent &&
@@ -294,7 +312,7 @@ isNativeFun i1 i2 = i1 == toStr topLevelClassIdent &&
         _             -> False
 
 runNative :: (LatteIO m, Monad m) => String -> [Val Pos] -> (Object -> InterpreterM m a) -> InterpreterM m a
-runNative x vals ret = case x of
+runNative i vals ret = case i of
     "printInt"    -> do
         x <- getVal (head vals)
         let PInt n = x
@@ -308,3 +326,14 @@ runNative x vals ret = case x of
     "error"       -> LatteIO.error
     "readInt"     -> readInt >>= ret . PInt
     "readString"  -> readString >>= ret . PStr
+    _             -> Prelude.error $ "internal error, invalid native fun " ++ i
+
+instance Show Object where
+    show o = case o of
+        Inst t _  -> clName t
+        Array t d -> clName t ++ "[" ++ show (length d) ++ "]"
+        Ptr t     -> show t ++ "&"
+        PInt _    -> "int"
+        PBool _   -> "bool"
+        PStr _    -> "string"
+        PNull     -> "null"

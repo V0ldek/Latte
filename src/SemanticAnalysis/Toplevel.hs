@@ -1,5 +1,5 @@
 -- Analyser of toplevel definitions generating class and function metadata.
-module SemanticAnalysis.Toplevel (programMetadata, Metadata(..)) where
+module SemanticAnalysis.TopLevel (programMetadata, Metadata(..)) where
 
 import           Control.Monad.State
 
@@ -15,7 +15,7 @@ import           Syntax.Code
 
 newtype Metadata a = Meta (Map.Map Ident (Class a))
 
--- Analyse the toplevel definitions in a program and produce its metadata.
+-- Analyse the top level definitions in a program and produce its metadata.
 programMetadata :: Program Code -> Either String (Metadata Code)
 programMetadata x = case x of
     Program _ ts -> topDefsMetadata ts

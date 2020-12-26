@@ -3,6 +3,7 @@
 -- by user code and unspeakable using lexical rules of the language.
 module Identifiers where
 
+import           Espresso.Syntax.Abs
 import           Syntax.Abs
 
 class ToString a where
@@ -11,7 +12,16 @@ class ToString a where
 instance ToString Ident where
     toStr (Ident s) = s
 
--- Identifier of the class that wraps toplevel functions.
+instance ToString LabIdent where
+    toStr (LabIdent s) = s
+
+instance ToString SymIdent where
+    toStr (SymIdent s) = s
+
+instance ToString ValIdent where
+    toStr (ValIdent s) = s
+
+-- Identifier of the class that wraps top level functions.
 topLevelClassIdent :: Ident
 topLevelClassIdent = Ident "~cl_TopLevel"
 
@@ -21,10 +31,10 @@ currentMthdSymIdent = Ident "~mthd_current"
 
 -- Identifiers used in for loop translation.
 forArrayIdent :: Ident
-forArrayIdent = Ident "~l_arr"
+forArrayIdent = Ident "~v_arr"
 
 forIndexIdent :: Ident
-forIndexIdent = Ident "~l_idx"
+forIndexIdent = Ident "~v_idx"
 
 
 selfSymIdent :: Ident
@@ -36,8 +46,11 @@ mainSymIdent = Ident "main"
 arrayLengthIdent :: Ident
 arrayLengthIdent = Ident "length"
 
-entryLabel :: String
-entryLabel = "L_entry"
+entryLabel :: LabIdent
+entryLabel = LabIdent ".L_entry"
+
+exitLabel :: LabIdent
+exitLabel = LabIdent ".L_exit"
 
 reservedNames :: [Ident]
 reservedNames = [selfSymIdent]
