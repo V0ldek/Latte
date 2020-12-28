@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFoldable #-}
 module Espresso.Syntax.Abs where
 
 import           Data.Maybe (fromJust)
@@ -15,43 +16,43 @@ newtype SymIdent = SymIdent String deriving (Eq, Ord, Show, Read)
 newtype LabIdent = LabIdent String deriving (Eq, Ord, Show, Read)
 newtype ValIdent = ValIdent String deriving (Eq, Ord, Show, Read)
 data QIdent a = QIdent a SymIdent SymIdent
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor QIdent where
     fmap f x = case x of
         QIdent a symident1 symident2 -> QIdent (f a) symident1 symident2
 data Program a = Program a (Metadata a) [Method a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Program where
     fmap f x = case x of
         Program a metadata methods -> Program (f a) (fmap f metadata) (map (fmap f) methods)
 data Metadata a = Meta a [ClassDef a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Metadata where
     fmap f x = case x of
         Meta a classdefs -> Meta (f a) (map (fmap f) classdefs)
 data ClassDef a = ClDef a SymIdent [FieldDef a] [MethodDef a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor ClassDef where
     fmap f x = case x of
         ClDef a symident fielddefs methoddefs -> ClDef (f a) symident (map (fmap f) fielddefs) (map (fmap f) methoddefs)
 data FieldDef a = FldDef a (SType a) SymIdent
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor FieldDef where
     fmap f x = case x of
         FldDef a stype symident -> FldDef (f a) (fmap f stype) symident
 data MethodDef a = MthdDef a (FType a) (QIdent a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor MethodDef where
     fmap f x = case x of
         MthdDef a ftype qident -> MthdDef (f a) (fmap f ftype) (fmap f qident)
 data FType a = FType a (SType a) [SType a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor FType where
     fmap f x = case x of
@@ -64,7 +65,7 @@ data SType a
     | Arr a (SType a)
     | Cl a SymIdent
     | Ref a (SType a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor SType where
     fmap f x = case x of
@@ -76,7 +77,7 @@ instance Functor SType where
         Cl a symident -> Cl (f a) symident
         Ref a stype   -> Ref (f a) (fmap f stype)
 data Method a = Mthd a (QIdent a) [Instr a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Method where
     fmap f x = case x of
@@ -98,7 +99,7 @@ data Instr a
     | IFld a ValIdent (Val a) (QIdent a)
     | IArr a ValIdent (Val a) (Val a)
     | IPhi a ValIdent [PhiVariant a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Instr where
     fmap f x = case x of
@@ -119,14 +120,14 @@ instance Functor Instr where
         IArr a valident val1 val2 -> IArr (f a) valident (fmap f val1) (fmap f val2)
         IPhi a valident phivariants -> IPhi (f a) valident (map (fmap f) phivariants)
 data PhiVariant a = PhiVar a LabIdent (Val a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor PhiVariant where
     fmap f x = case x of
         PhiVar a labident val -> PhiVar (f a) labident (fmap f val)
 data Call a
     = Call a (QIdent a) [Val a] | CallVirt a (QIdent a) [Val a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Call where
     fmap f x = case x of
@@ -140,7 +141,7 @@ data Val a
     | VFalse a
     | VNull a
     | VVal a ValIdent
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Val where
     fmap f x = case x of
@@ -165,7 +166,7 @@ data Op a
     | OpNE a
     | OpAnd a
     | OpOr a
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Op where
     fmap f x = case x of
@@ -183,7 +184,7 @@ instance Functor Op where
         OpAnd a -> OpAnd (f a)
         OpOr a  -> OpOr (f a)
 data UnOp a = UnOpNeg a | UnOpNot a
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor UnOp where
     fmap f x = case x of

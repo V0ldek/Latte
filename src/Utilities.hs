@@ -1,6 +1,7 @@
 module Utilities where
 
 import           Control.Monad (unless)
+import           Data.Foldable
 import           Data.List     (sort, sortOn)
 import qualified Data.Map      as Map
 
@@ -37,11 +38,14 @@ findConflictsBy fa fb as bs = unzip $ foldr checkForConfl [] bs
 -- O(nlogn) deduplication.
 dedup :: Ord a => [a] -> [a]
 dedup xs = run (sort xs)
-    where run []     = []
-          run (x:xs) = x : run (dropWhile (== x) xs )
+    where run []      = []
+          run (x:xs') = x : run (dropWhile (== x) xs' )
 
 -- O(nlogn) deduplication by key.
 dedupBy :: Ord k => (a -> k) -> [a] -> [a]
 dedupBy f xs = run (sortOn fst $ map (\x -> (f x, x)) xs)
-    where run []          = []
-          run ((k, x):xs) = x : run (dropWhile ((== k) . fst) xs)
+    where run []           = []
+          run ((k, x):xs') = x : run (dropWhile ((== k) . fst) xs')
+
+single :: (Foldable f) => f a -> Maybe a
+single = find (const True)

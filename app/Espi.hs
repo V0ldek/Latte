@@ -52,8 +52,7 @@ run v p s = case p ts of
       let mthds' = map (\(g, Mthd a' i _) -> Mthd a' i (linearize g)) cfgs
           tree'' = Program a meta mthds'
       showTree v tree''
-      n <- interpret tree''
-      exitWith (if n == 0 then ExitSuccess else ExitFailure n)
+      interpret tree''
   where
   ts = myLexer s
 

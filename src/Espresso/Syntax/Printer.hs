@@ -11,6 +11,9 @@ import Data.Char
 printTree :: Print a => a -> String
 printTree = render . prt 0
 
+printTreeWithInstrComments :: (Show a) => Program a -> String
+printTreeWithInstrComments = undefined 
+
 type Doc = [ShowS] -> [ShowS]
 
 doc :: ShowS -> Doc

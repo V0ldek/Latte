@@ -12,6 +12,7 @@ import           Data.Maybe
 import           Espresso.Syntax.Abs
 import           Identifiers
 import           LatteIO
+import           System.Exit          (ExitCode (..))
 
 type Loc = Int
 type OEnv = Map.Map String Loc
@@ -36,18 +37,11 @@ data Function = Fun { funName :: String, funRet :: SType (), funParams :: [SType
 
 type InterpreterM m = StateT Store (ReaderT Env m)
 
-instance (Monad m, LatteIO m) => LatteIO (InterpreterM m) where
-    readInt = lift $ lift readInt
-    readString = lift $ lift readString
-    error = lift $ lift LatteIO.error
-    printInt n = lift $ lift $ printInt n
-    printString s = lift $ lift $ printString s
-
-interpret :: (LatteIO m, Monad m) => Program Pos -> m Int
+interpret :: (LatteIO m, Monad m) => Program Pos -> m ()
 interpret (Program _ (Meta _ clDefs) methods) = do
     obj <- runReaderT (evalStateT go Map.empty) (Env Map.empty env Map.empty)
     let PInt n = obj
-    return n
+    if n == 0 then exitSuccess else exitWith $ ExitFailure n
     where
         env = let cls = map clDefToCl clDefs
                     in Map.fromList (zip (map clName cls) cls)
@@ -93,7 +87,7 @@ callFromCallsite callsite ret = case callsite of
         if isNativeFun (toStr i1) (toStr i2) then runNative (toStr i2) vals ret else (do
             f <- askFun (toStr i1) (toStr i2)
             call f args ret)
-    CallVirt {} -> printString "callvirt unimplemented" >> LatteIO.error
+    CallVirt {} -> LatteIO.error "callvirt unimplemented"
 
 execute :: (LatteIO m, Monad m) => String -> String -> [Instr Pos] -> (Object -> InterpreterM m a) -> InterpreterM m a
 execute _ _ [] ret = ret PNull
@@ -145,8 +139,8 @@ execute prevLabel currLabel (instr : is) ret = case instr of
         x2 <- getVal v2
         storeInto x1 x2
         execute prevLabel currLabel is ret
-    IFld {} -> printString "fields unimplemented" >> LatteIO.error
-    IArr {} -> printString "arrays unimplemented" >> LatteIO.error
+    IFld {} -> LatteIO.error "fields unimplemented"
+    IArr {} -> LatteIO.error "arrays unimplemented"
     IPhi _ i variants -> do
         let Just (PhiVar _ _ val) = find (\(PhiVar _ l _) -> toStr l == prevLabel) variants
         obj <- getVal val
@@ -157,28 +151,28 @@ askFun :: (LatteIO m, Monad m) => String -> String -> InterpreterM m Function
 askFun clI mthdI = do
     cl <- askCl clI
     case Map.lookup mthdI (clMthds cl) of
-        Nothing -> printString ("internal error, method " ++ clI ++ "." ++ mthdI ++ " not found") >> LatteIO.error
+        Nothing -> LatteIO.error ("internal error, method " ++ clI ++ "." ++ mthdI ++ " not found")
         Just mthd -> return mthd
 
 askCl :: (LatteIO m, Monad m) =>  String -> InterpreterM m Class
 askCl clI = do
     mbcl <- asks (Map.lookup clI . clEnv)
     case mbcl of
-        Nothing -> printString ("internal error, class " ++ clI ++ " not found") >> LatteIO.error
+        Nothing -> LatteIO.error ("internal error, class " ++ clI ++ " not found")
         Just cl -> return cl
 
 askLabel :: (LatteIO m, Monad m) => String -> InterpreterM m [Instr Pos]
 askLabel label = do
     mbl <- asks (Map.lookup label . labelEnv)
     case mbl of
-        Nothing -> printString ("internal error, label " ++ label ++ " not found") >> LatteIO.error
+        Nothing -> LatteIO.error ("internal error, label " ++ label ++ " not found")
         Just l -> return l
 
 askObj :: (LatteIO m, Monad m) => String -> InterpreterM m Loc
 askObj i = do
     mbobj <- asks (Map.lookup i . objEnv)
     case mbobj of
-        Nothing -> printString ("internal error, object " ++ i ++ " not found") >> LatteIO.error
+        Nothing -> LatteIO.error ("internal error, object " ++ i ++ " not found")
         Just l -> return l
 
 allocs :: (LatteIO m, Monad m) => [(String, Object)] -> InterpreterM m [(String, Loc)]
@@ -245,7 +239,7 @@ deref x = case x of
     Ptr loc -> do
         mbobj <- gets (Map.lookup loc)
         case mbobj of
-            Nothing  -> printString ("internal error, pointer " ++ show loc ++ " not found") >> LatteIO.error
+            Nothing  -> LatteIO.error ("internal error, pointer " ++ show loc ++ " not found")
             Just obj -> return obj
     _       -> Prelude.error "internal error, invalid deref"
 
@@ -323,7 +317,7 @@ runNative i vals ret = case i of
         let PStr s = x
         printString s
         ret PNull
-    "error"       -> LatteIO.error
+    "error"       -> LatteIO.error ""
     "readInt"     -> readInt >>= ret . PInt
     "readString"  -> readString >>= ret . PStr
     _             -> Prelude.error $ "internal error, invalid native fun " ++ i
@@ -337,3 +331,18 @@ instance Show Object where
         PBool _   -> "bool"
         PStr _    -> "string"
         PNull     -> "null"
+
+instance (Monad m, LatteIO m) => LatteIO (InterpreterM m) where
+    readInt = lift $ lift readInt
+    readString = lift $ lift readString
+    error s = lift $ lift $ LatteIO.error s
+    printInt n = lift $ lift $ printInt n
+    printString s = lift $ lift $ printString s
+    printErrorString s = lift $ lift $ printErrorString s
+    doesDirectoryExist d = lift $ lift $ doesDirectoryExist d
+    doesFileExist f = lift $ lift $ doesFileExist f
+    readFile f = lift $ lift $ LatteIO.readFile f
+    writeFile f c = lift $ lift $ LatteIO.writeFile f c
+    exitWith c = lift $ lift $ exitWith c
+    exitSuccess = lift $ lift exitSuccess
+    exitFailure = lift $ lift exitFailure
