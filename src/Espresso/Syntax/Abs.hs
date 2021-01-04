@@ -76,12 +76,18 @@ instance Functor SType where
         Arr a stype   -> Arr (f a) (fmap f stype)
         Cl a symident -> Cl (f a) symident
         Ref a stype   -> Ref (f a) (fmap f stype)
-data Method a = Mthd a (QIdent a) [Instr a]
+data Method a = Mthd a (SType a) (QIdent a) [Param a] [Instr a]
   deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Method where
     fmap f x = case x of
-        Mthd a qident instrs -> Mthd (f a) (fmap f qident) (map (fmap f) instrs)
+        Mthd a stype qident params instrs -> Mthd (f a) (fmap f stype) (fmap f qident) (map (fmap f) params) (map (fmap f) instrs)
+data Param a = Param a (SType a) ValIdent
+  deriving (Eq, Ord, Show, Read, Foldable)
+
+instance Functor Param where
+    fmap f x = case x of
+        Param a stype valident -> Param (f a) (fmap f stype) valident
 data Instr a
     = ILabel a LabIdent
     | ILabelAnn a LabIdent Integer Integer
@@ -126,13 +132,14 @@ instance Functor PhiVariant where
     fmap f x = case x of
         PhiVar a labident val -> PhiVar (f a) labident (fmap f val)
 data Call a
-    = Call a (QIdent a) [Val a] | CallVirt a (QIdent a) [Val a]
+    = Call a (SType a) (QIdent a) [Val a]
+    | CallVirt a (SType a) (QIdent a) [Val a]
   deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Call where
     fmap f x = case x of
-        Call a qident vals -> Call (f a) (fmap f qident) (map (fmap f) vals)
-        CallVirt a qident vals -> CallVirt (f a) (fmap f qident) (map (fmap f) vals)
+        Call a stype qident vals -> Call (f a) (fmap f stype) (fmap f qident) (map (fmap f) vals)
+        CallVirt a stype qident vals -> CallVirt (f a) (fmap f stype) (fmap f qident) (map (fmap f) vals)
 data Val a
     = VInt a Integer
     | VNegInt a Integer
@@ -140,18 +147,18 @@ data Val a
     | VTrue a
     | VFalse a
     | VNull a
-    | VVal a ValIdent
+    | VVal a (SType a) ValIdent
   deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Val where
     fmap f x = case x of
-        VInt a integer    -> VInt (f a) integer
-        VNegInt a integer -> VNegInt (f a) integer
-        VStr a string     -> VStr (f a) string
-        VTrue a           -> VTrue (f a)
-        VFalse a          -> VFalse (f a)
-        VNull a           -> VNull (f a)
-        VVal a valident   -> VVal (f a) valident
+        VInt a integer        -> VInt (f a) integer
+        VNegInt a integer     -> VNegInt (f a) integer
+        VStr a string         -> VStr (f a) string
+        VTrue a               -> VTrue (f a)
+        VFalse a              -> VFalse (f a)
+        VNull a               -> VNull (f a)
+        VVal a stype valident -> VVal (f a) (fmap f stype) valident
 data Op a
     = OpAdd a
     | OpSub a

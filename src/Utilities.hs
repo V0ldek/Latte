@@ -1,14 +1,20 @@
 module Utilities where
 
-import           Control.Monad (unless)
+import           Control.Monad (unless, when)
 import           Data.Foldable
 import           Data.List     (sort, sortOn)
 import qualified Data.Map      as Map
+import           Data.Maybe
 
 unlessM :: Monad m => m Bool -> m () -> m ()
 unlessM p a = do
   b <- p
   unless b a
+
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM p a = do
+  b <- p
+  when b a
 
 -- Find duplicates in a given list based on a key selector.
 -- Returns a deduplicated list of duplicated keys and a list of values such that
@@ -47,5 +53,21 @@ dedupBy f xs = run (sortOn fst $ map (\x -> (f x, x)) xs)
     where run []           = []
           run ((k, x):xs') = x : run (dropWhile ((== k) . fst) xs')
 
-single :: (Foldable f) => f a -> Maybe a
-single = find (const True)
+ffirst :: (Foldable f) => f a -> Maybe a
+ffirst = find (const True)
+
+single :: (Foldable f) => f a -> a
+single xs = case ffirst xs of
+    Nothing -> error "single: empty structure"
+    Just x  -> x
+
+fixpoint :: (Eq a) => (a -> a) -> a -> a
+fixpoint f x = let x' = f x in if x == x' then x else fixpoint f x'
+
+splitLast :: [a] -> (a, [a])
+splitLast [] = error "empty"
+splitLast xs =
+    let (a, as) = foldr f (Nothing, []) xs
+    in (fromJust a, as)
+    where f x (Nothing, as) = (Just x, as)
+          f x' (x, as)      = (x, x':as)

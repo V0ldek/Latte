@@ -2,7 +2,7 @@ module Espi where
 
 import           Control.Monad            (when)
 import           System.Environment       (getArgs)
-import           System.Exit              (ExitCode (..), exitFailure, exitWith)
+import           System.Exit              (exitFailure)
 import           System.IO                (hPutStr, hPutStrLn, stderr)
 
 import           ErrM                     (toEither)
@@ -49,7 +49,7 @@ run v p s = case p ts of
       showTree v tree'
       let cfgs = zip (map cfg mthds) mthds
       showCfgs v cfgs
-      let mthds' = map (\(g, Mthd a' i _) -> Mthd a' i (linearize g)) cfgs
+      let mthds' = map (\(g, Mthd a' r i ps _) -> Mthd a' r i ps (linearize g)) cfgs
           tree'' = Program a meta mthds'
       showTree v tree''
       interpret tree''
@@ -65,7 +65,7 @@ showTree v tree
 showCfgs :: Int -> [(CFG a, Method a)] -> IO ()
 showCfgs v = mapM_ showCfg
   where
-    showCfg (g, Mthd _ (QIdent _ (SymIdent i1) (SymIdent i2)) _) = do
+    showCfg (g, Mthd _ _ (QIdent _ (SymIdent i1) (SymIdent i2)) _ _) = do
       putStrV v ("CFG for " ++ i1 ++ "." ++ i2 ++ ":")
       putStrV v $ show g
 

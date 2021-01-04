@@ -1,12 +1,14 @@
 module Compiler where
 
 import           Control.Monad                 (when)
+import           Data.Bifunctor
 import qualified Data.Map                      as Map
-import           Data.Maybe                    (fromJust)
 import           ErrM                          (toEither)
 import           Espresso.CodeGen.Generator    (generateEspresso)
 import           Espresso.ControlFlow.CFG
-import           Espresso.ControlFlow.Liveness (Liveness)
+import           Espresso.ControlFlow.Liveness (Liveness, analyseLiveness,
+                                                emptyLiveness)
+import           Espresso.ControlFlow.Phi
 import qualified Espresso.Syntax.Abs           as Esp
 import           Espresso.Syntax.Printer       as PrintEsp (Print, printTree,
                                                             printTreeWithInstrComments)
@@ -23,6 +25,7 @@ import           Syntax.Rewriter               (rewrite)
 import           System.FilePath               (dropExtension, takeDirectory,
                                                 takeFileName, (<.>), (</>))
 import           Utilities                     (single, unlessM)
+import           X86_64.Generator
 
 data Verbosity = Quiet | Verbose deriving (Eq, Ord, Show)
 
@@ -58,14 +61,22 @@ run opt = do
     genStep opt (espressoFile directory fileName) (PrintEsp.printTree espresso)
     printStringV v "Building CFGs..."
     let cfgs = zip (map cfg mthds) mthds
-        espressoOpt = PrintEsp.printTree $ Esp.Program a meta (cfgsToMthds cfgs)
+        espressoOpt = PrintEsp.printTree $ Esp.Program a meta (cfgsToMthds () cfgs)
     genStep opt (espressoCfgFile directory fileName) (showCfgs cfgs)
     genStep opt (espressoOptFile directory fileName) espressoOpt
-    {-printStringV v "Analysing liveness..."
+    printStringV v "Analysing liveness..."
     let cfgsWithLiveness = map (first analyseLiveness) cfgs
-        espressoWithLiveness = showEspWithLiveness meta (cfgsToMthds cfgsWithLiveness)
+        espressoWithLiveness = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgsWithLiveness)
     genStep opt (espressoCfgWithLivenessFile directory fileName) (showCfgsWithLiveness cfgsWithLiveness)
-    genStep opt (espressoOptWithLivenessFile directory fileName) espressoWithLiveness-}
+    genStep opt (espressoOptWithLivenessFile directory fileName) espressoWithLiveness
+    printStringV v "Unfolding phis..."
+    let cfgsWithUnfoldedPhi = map (first unfoldPhi) cfgsWithLiveness
+        espressoWithUnfoldedPhi = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgsWithUnfoldedPhi)
+    genStep opt (espressoCfgWithUnfoldedPhiFile directory fileName) (showCfgsWithLiveness cfgsWithUnfoldedPhi)
+    genStep opt (espressoOptWithUnfoldedPhiFile directory fileName) espressoWithUnfoldedPhi
+    printStringV v "Generating x86_64 assembly..."
+    let assembledMthds = map (\(g, mthd) -> generate mthd g) cfgsWithUnfoldedPhi
+    genStep opt (assemblyFile directory fileName) (combineAssembly assembledMthds)
     exitSuccess
 
 analysePhase :: (Monad m, LatteIO m) => Options -> String -> m (Metadata SemData)
@@ -134,25 +145,29 @@ showEspTree v tree
 showCfgs :: [(CFG a, Esp.Method a)] -> String
 showCfgs cfgs = unlines $ map showCfg cfgs
   where
-    showCfg (g, Esp.Mthd _ (Esp.QIdent _ (Esp.SymIdent i1) (Esp.SymIdent i2)) _) =
+    showCfg (g, Esp.Mthd _ _ (Esp.QIdent _ (Esp.SymIdent i1) (Esp.SymIdent i2)) _ _) =
       "CFG for " ++ i1 ++ "." ++ i2 ++ ":\n" ++ show g
 
-cfgsToMthds :: [(CFG a, Esp.Method b)] -> [Esp.Method a]
-cfgsToMthds = map (\(g, Esp.Mthd _ i _) -> Esp.Mthd undefined (undefined <$ i) (linearize g))
+cfgsToMthds ::  a -> [(CFG a, Esp.Method b)] -> [Esp.Method a]
+cfgsToMthds default_ = map (\(g, Esp.Mthd _ r i ps _) ->
+    Esp.Mthd default_ (default_ <$ r) (default_ <$ i) (map (default_ <$) ps) (linearize g))
 
 showCfgsWithLiveness :: [(CFG Liveness, Esp.Method a)] -> String
 showCfgsWithLiveness cfgs = unlines $ map showCfg cfgs
   where
-    showCfg (CFG g, Esp.Mthd _ (Esp.QIdent _ (Esp.SymIdent i1) (Esp.SymIdent i2)) _) =
+    showCfg (CFG g, Esp.Mthd _ _ (Esp.QIdent _ (Esp.SymIdent i1) (Esp.SymIdent i2)) _ _) =
       "CFG for " ++ i1 ++ "." ++ i2 ++ ":\n" ++ show (CFG g) ++ concatMap showLiveness (Map.elems g)
     showLiveness node =
         let firstInstr = head $ nodeCode node
             lastInstr = last $ nodeCode node
-        in "Liveness at start of " ++ toStr (nodeLabel node) ++ ": " ++ show (fromJust $ single firstInstr) ++ "\n" ++
-           "Liveness at end of " ++ toStr (nodeLabel node) ++ ": " ++ show (fromJust $ single lastInstr)
+        in "Liveness at start of " ++ toStr (nodeLabel node) ++ ": " ++ show (single firstInstr) ++ "\n" ++
+           "Liveness at end of " ++ toStr (nodeLabel node) ++ ": " ++ show (single lastInstr) ++ "\n"
 
 showEspWithLiveness :: Esp.Metadata a -> [Esp.Method Liveness] -> String
-showEspWithLiveness meta mthds = PrintEsp.printTreeWithInstrComments (Esp.Program undefined (undefined <$ meta) mthds)
+showEspWithLiveness meta mthds = PrintEsp.printTreeWithInstrComments (Esp.Program emptyLiveness (emptyLiveness <$ meta) mthds)
+
+assemblyFile :: FilePath -> FilePath -> FilePath
+assemblyFile dir file = dir </> file <.> "s"
 
 espressoFile :: FilePath -> FilePath -> FilePath
 espressoFile dir file = dir </> file <.> "esp"
@@ -168,3 +183,9 @@ espressoCfgWithLivenessFile dir file = dir </> file <.> "liv" <.> "cfg"
 
 espressoOptWithLivenessFile :: FilePath -> FilePath -> FilePath
 espressoOptWithLivenessFile dir file = dir </> file <.> "liv" <.> "opt" <.> "esp"
+
+espressoCfgWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
+espressoCfgWithUnfoldedPhiFile dir file = dir </> file <.> "liv" <.> "phi" <.> "cfg"
+
+espressoOptWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
+espressoOptWithUnfoldedPhiFile dir file = dir </> file <.> "liv" <.> "opt" <.> "phi" <.> "esp"

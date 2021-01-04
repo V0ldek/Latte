@@ -14,7 +14,6 @@ import           System.FilePath        (replaceExtension, takeBaseName,
                                          takeExtension, (<.>), (</>))
 import           Test.Hspec
 
-
 data LatTest = LatTest {
     tstName     :: String,
     tstContents :: String,
@@ -25,7 +24,7 @@ data LatTest = LatTest {
 data LatResult = Res Int [String] deriving (Eq, Show, Ord)
 
 skip :: [String]
-skip = ["core024"]
+skip = []
 
 spec :: Spec
 spec = parallel $ do
@@ -86,8 +85,8 @@ goodTest latTest =
                 LatteIO.staticCode espOptOut `shouldBe` ExitSuccess
             it (tstName latTest ++ " optimised Espresso output is correct") $
                 normaliseOut (LatteIO.staticOut espOptOut) `shouldBe` normaliseOut (tstOut latTest)
-        (Left s, _) -> Prelude.error s
-        (_, Left s) -> Prelude.error s
+        (Left s, _) -> Prelude.error (tstName latTest ++ ": " ++ s)
+        (_, Left s) -> Prelude.error (tstName latTest ++ ": " ++ s)
 
 badTest :: LatTest -> Spec
 badTest latTest = do

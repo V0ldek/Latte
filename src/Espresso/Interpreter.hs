@@ -33,7 +33,7 @@ data Object = Inst { objType_ :: Class, objData_ :: OEnv }
 data Class = Class { clName :: String, clFlds :: Map.Map String Field, clMthds :: Map.Map String Function }
 
 data Field = Fld { fldName :: String, fldType :: SType () }
-data Function = Fun { funName :: String, funRet :: SType (), funParams :: [SType ()], funCode :: [Instr Pos] }
+data Function = Fun { funName :: String, funRet :: SType (), funParams :: [Param ()], funCode :: [Instr Pos] }
 
 type InterpreterM m = StateT Store (ReaderT Env m)
 
@@ -51,27 +51,27 @@ interpret (Program _ (Meta _ clDefs) methods) = do
                                                      mthdMap = Map.fromList $ zip (map funName mthds) mthds
                                                  in Class (toStr i) fldMap mthdMap
         fldDefToFld (FldDef _ t i) = Fld (toStr i) (() <$ t)
-        mthdDefToFun (MthdDef _ (FType _ r ps) qi) =
+        mthdDefToFun (MthdDef _ (FType _ r _) qi) =
             let QIdent _ cli i = qi
             in  if isNativeFun (toStr cli) (toStr i)
                     then Nothing
-                    else let Mthd _ _ code = case Map.lookup (cli, i) methodMap of
+                    else let Mthd _ _ _ ps code = case Map.lookup (cli, i) methodMap of
                                 Nothing -> Prelude.error $ "internal error, method " ++ toStr cli ++ "." ++ toStr i ++ " not found"
                                 Just m  -> m
                          in  Just $ Fun (toStr i) (() <$ r) (map (() <$) ps) code
-        methodMap = Map.fromList $ zip (map (\(Mthd _ (QIdent _ cli i) _) -> (cli, i)) methods) methods
+        methodMap = Map.fromList $ zip (map (\(Mthd _ _ (QIdent _ cli i) _ _) -> (cli, i)) methods) methods
         go = do
             main <- askFun (toStr topLevelClassIdent) (toStr mainSymIdent)
             call main [] return
 
 call :: (LatteIO m, Monad m) => Function -> [Object] -> (Object -> InterpreterM m a) -> InterpreterM m a
-call (Fun _ _ _ code) objs ret = do
+call (Fun _ _ ps code) objs ret = do
     argEnv <- allocs args
     let labels = getLabels code
     ret' <- saveEnv2 ret
     localObjs argEnv $ localLabels labels $ execute (toStr entryLabel) (toStr entryLabel) code ret'
     where
-        args = zipWith (\i p -> ("%a_" ++ show i, p)) [0..] objs
+        args = zipWith (\(Param _ _ vi) p -> (toStr vi, p)) ps objs
 
 getLabels :: [Instr Pos] -> [(String, [Instr Pos])]
 getLabels [] = []
@@ -82,7 +82,7 @@ getLabels (i : is) = case i of
 
 callFromCallsite :: (LatteIO m, Monad m) => Call Pos -> (Object -> InterpreterM m a) -> InterpreterM m a
 callFromCallsite callsite ret = case callsite of
-    Call _ (QIdent _ i1 i2) vals     -> do
+    Call _ _ (QIdent _ i1 i2) vals     -> do
         args <- mapM getVal vals
         if isNativeFun (toStr i1) (toStr i2) then runNative (toStr i2) vals ret else (do
             f <- askFun (toStr i1) (toStr i2)
@@ -207,7 +207,7 @@ getVal val = case val of
     VTrue _     -> return $ PBool True
     VFalse _    -> return $ PBool False
     VNull _     -> return PNull
-    VVal _ i    -> getObj (toStr i)
+    VVal _ _ i  -> getObj (toStr i)
 
 getObj :: (LatteIO m, Monad m) => String -> InterpreterM m Object
 getObj i = do

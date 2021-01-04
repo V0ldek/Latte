@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveFoldable   #-}
+{-# LANGUAGE DeriveFunctor    #-}
 {-# LANGUAGE FlexibleContexts #-}
 module Espresso.ControlFlow.CFG (cfg, CFG(..), Node(..), linearize) where
 
@@ -8,17 +10,17 @@ import qualified Data.Set            as Set
 import           Espresso.Syntax.Abs
 import           Identifiers
 
-newtype CFG a = CFG (Map.Map LabIdent (Node a))
+newtype CFG a = CFG (Map.Map LabIdent (Node a)) deriving (Eq, Functor, Foldable)
 
 data Node a = Node {
     nodeLabel :: LabIdent,
     nodeCode  :: [Instr a],
     nodeOut   :: Set.Set LabIdent,
     nodeIn    :: Set.Set LabIdent
-}
+} deriving (Eq, Functor, Foldable)
 
 cfg :: Method a -> CFG a
-cfg (Mthd _ _ instrs) =
+cfg (Mthd _ _ _ _ instrs) =
     let basicBlocks = splitBasicBlocks instrs
         initial = Map.fromList $ map (\(l, is) -> (l, Node l is Set.empty Set.empty)) basicBlocks
     in  execState (construct basicBlocks) (CFG initial)

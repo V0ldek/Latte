@@ -36,12 +36,15 @@ Ref.       SType ::= SType "&" ;
 
 separator SType "," ;
 
-Mthd. Method ::= ".method " QIdent ":" "[" [Instr] "]" ;
+Mthd. Method ::= ".method " SType QIdent "(" [Param] ")" ":" "[" [Instr] "]" ;
+
+Param. Param ::= SType ValIdent ;
+separator Param "," ;
 
 separator Method "" ;
 
 ILabel.    Instr ::= LabIdent ":" ;
-ILabelAnn. Instr ::= LabIdent ":" "/*" "lines" Integer "to" Integer "*/" ;
+ILabelAnn. Instr ::= LabIdent ":" "(" "lines" Integer "to" Integer ")" ;
 IVRet.     Instr ::= "return" ";" ;
 IRet.      Instr ::= "return" Val ";" ;
 IOp.       Instr ::= ValIdent ":=" Val Op Val ";" ;
@@ -59,8 +62,8 @@ IPhi.      Instr ::= ValIdent ":=" "phi" "(" [PhiVariant] ")" ";" ;
 
 PhiVar. PhiVariant ::= LabIdent ":" Val ;
 
-Call.     Call ::= "call" QIdent "(" [Val] ")" ;
-CallVirt. Call ::= "callvirt" QIdent "(" [Val] ")" ;
+Call.     Call ::= "call" SType QIdent "(" [Val] ")" ;
+CallVirt. Call ::= "callvirt" SType QIdent "(" [Val] ")" ;
 
 separator Instr "" ;
 separator Val "," ;
@@ -72,7 +75,7 @@ VStr.   Val ::= String ;
 VTrue.  Val ::= "true" ;
 VFalse. Val ::= "false" ;
 VNull.  Val ::= "null" ;
-VVal.   Val ::= ValIdent ;
+VVal.   Val ::= SType ValIdent ;
 
 OpAdd. Op ::= "+" ;
 OpSub. Op ::= "-" ;

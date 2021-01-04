@@ -11,9 +11,6 @@ import Data.Char
 printTree :: Print a => a -> String
 printTree = render . prt 0
 
-printTreeWithInstrComments :: (Show a) => Program a -> String
-printTreeWithInstrComments = undefined 
-
 type Doc = [ShowS] -> [ShowS]
 
 doc :: ShowS -> Doc
@@ -26,7 +23,7 @@ pattern Label l <- l@('.':'L':_)
 render :: Doc -> String
 render d = rend 0 (map ($ "") $ d []) "" where
   rend i ss = case ss of
-    ".method":ts -> new i . showString ".method" . rend i ts
+    ".method":ts -> new i . space ".method" . rend i ts
     "[":"]":"]":ts -> space "[" . showChar ']' . rend i ("]":ts)
     "[" : "]":ts -> space "[" . showChar ']' . new i . rend i ts
     "[":Label l:ts -> space "[" . new i . rend i (l:ts)
@@ -38,10 +35,11 @@ render d = rend 0 (map ($ "") $ d []) "" where
     t   : ";":ts -> showString t . rend i (";":ts)
     ";" : "]":ts -> showChar ';' . rend i ("]":ts)
     ";":Label l:ts -> showChar ';' . new (i-1) . rend (i-1) (l:ts)
+    ";" :"/*":ts -> space ";" . space "/*" . rend i ts
     ";"      :ts -> showChar ';' . new i . rend i ts
     ":" : "=":ts -> showChar ':' . showChar '=' . rend (i+1) ts
-    ":" :"/*":ts -> space ":" . space "/*" . rend i ts
     "*/": "]":ts -> showString "*/" . rend i ("]":ts)
+    "*/":Label l:ts -> showString "*/" . new (i-1) . rend (i-1) (l:ts)
     "*/"     :ts -> showString "*/" . new i . rend i ts
     Label l1:":":Label l2:":":ts -> showString l1 . showChar ':' . new i . rend i (l2:":":ts)
     Label l:":":"]":ts -> showString l . showChar ':' . rend (i+1) ("]":ts)
@@ -162,9 +160,15 @@ instance Print (SType a) where
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
 instance Print (Method a) where
   prt i e = case e of
-    Mthd _ qident instrs -> prPrec i 0 (concatD [doc (showString ".method"), prt 0 qident, doc (showString ":"), doc (showString "["), prt 0 instrs, doc (showString "]")])
+    Mthd _ stype qident params instrs -> prPrec i 0 (concatD [doc (showString ".method"), prt 0 stype, prt 0 qident, doc (showString "("), prt 0 params, doc (showString ")"), doc (showString ":"), doc (showString "["), prt 0 instrs, doc (showString "]")])
   prtList _ [] = (concatD [])
   prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
+instance Print (Param a) where
+  prt i e = case e of
+    Param _ stype valident -> prPrec i 0 (concatD [prt 0 stype, prt 0 valident])
+  prtList _ [] = (concatD [])
+  prtList _ [x] = (concatD [prt 0 x])
+  prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
 instance Print (Instr a) where
   prt i e = case e of
     ILabel _ labident -> prPrec i 0 (concatD [prt 0 labident, doc (showString ":")])
@@ -193,8 +197,8 @@ instance Print (PhiVariant a) where
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
 instance Print (Call a) where
   prt i e = case e of
-    Call _ qident vals -> prPrec i 0 (concatD [doc (showString "call"), prt 0 qident, doc (showString "("), prt 0 vals, doc (showString ")")])
-    CallVirt _ qident vals -> prPrec i 0 (concatD [doc (showString "callvirt"), prt 0 qident, doc (showString "("), prt 0 vals, doc (showString ")")])
+    Call _ stype qident vals -> prPrec i 0 (concatD [doc (showString "call"), prt 0 stype, prt 0 qident, doc (showString "("), prt 0 vals, doc (showString ")")])
+    CallVirt _ stype qident vals -> prPrec i 0 (concatD [doc (showString "callvirt"), prt 0 stype, prt 0 qident, doc (showString "("), prt 0 vals, doc (showString ")")])
 
 instance Print (Val a) where
   prt i e = case e of
@@ -204,7 +208,7 @@ instance Print (Val a) where
     VTrue _ -> prPrec i 0 (concatD [doc (showString "true")])
     VFalse _ -> prPrec i 0 (concatD [doc (showString "false")])
     VNull _ -> prPrec i 0 (concatD [doc (showString "null")])
-    VVal _ valident -> prPrec i 0 (concatD [prt 0 valident])
+    VVal _ stype valident -> prPrec i 0 (concatD [prt 0 stype, prt 0 valident])
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
   prtList _ (x:xs) = (concatD [prt 0 x, doc (showString ","), prt 0 xs])
@@ -228,3 +232,99 @@ instance Print (UnOp a) where
   prt i e = case e of
     UnOpNeg _ -> prPrec i 0 (concatD [doc (showString "-")])
     UnOpNot _ -> prPrec i 0 (concatD [doc (showString "!")])
+
+printTreeWithInstrComments :: (Show a) => Program a -> String
+printTreeWithInstrComments = render . prtWComments 0 
+
+class PrintWithComments a where
+  prtWComments :: Int -> a -> Doc
+  prtListWComments :: Int -> [a] -> Doc
+  prtListWComments i = concatD . map (prtWComments i)
+
+instance PrintWithComments a => PrintWithComments [a] where
+  prtWComments = prtListWComments
+
+instance PrintWithComments Char where
+  prtWComments = prt
+
+instance PrintWithComments Integer where
+  prtWComments = prt
+
+instance PrintWithComments Double where
+  prtWComments = prt
+
+instance PrintWithComments SymIdent where
+  prtWComments = prt
+
+instance PrintWithComments LabIdent where
+  prtWComments = prt
+
+instance PrintWithComments ValIdent where
+  prtWComments = prt
+
+instance PrintWithComments (QIdent a) where
+  prtWComments = prt
+
+instance Show a => PrintWithComments (Program a) where
+  prtWComments i e = case e of
+    Program _ metadata methods -> prPrec i 0 (concatD [prtWComments 0 metadata, prtWComments 0 methods])
+
+instance PrintWithComments (Metadata a) where
+  prtWComments = prt
+  
+instance PrintWithComments (ClassDef a) where
+  prtWComments = prt
+
+instance PrintWithComments (FieldDef a) where
+  prtWComments = prt
+
+instance PrintWithComments (MethodDef a) where
+  prtWComments = prt
+
+instance PrintWithComments (FType a) where
+  prtWComments = prt
+
+instance PrintWithComments (SType a) where
+  prtWComments = prt
+
+instance Show a => PrintWithComments (Method a) where
+  prtWComments i e = case e of    
+    Mthd _ stype qident params instrs -> prPrec i 0 (concatD [doc (showString ".method"), prt 0 stype, prt 0 qident, doc (showString "("), prt 0 params, doc (showString ")"), doc (showString ":"), doc (showString "["), prtWComments 0 instrs, doc (showString "]")])
+  prtListWComments _ [] = (concatD [])
+  prtListWComments _ (x:xs) = (concatD [prtWComments 0 x, prtWComments 0 xs])
+
+instance Show a => PrintWithComments (Instr a) where
+  prtWComments i e = case e of
+    ILabel a labident -> prPrec i 0 (concatD [prt 0 labident, doc (showString ":"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    ILabelAnn a (LabIdent ident) n1 n2 -> prPrec i 0 (concatD [doc (showString ident), doc (showString ":"), doc (showString "/*"), doc (showString "lines"), prt 0 n1, doc (showString "to"), prt 0 n2, doc (showString "*/"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IVRet a -> prPrec i 0 (concatD [doc (showString "return"), doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IRet a val -> prPrec i 0 (concatD [doc (showString "return"), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IOp a valident val1 op val2 -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 val1, prt 0 op, prt 0 val2, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    ISet a valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IUnOp a valident unop val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 unop, prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IVCall a call -> prPrec i 0 (concatD [prt 0 call, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    ICall a valident call -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 call, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IJmp a labident -> prPrec i 0 (concatD [doc (showString "jump"), prt 0 labident, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    ICondJmp a val labident1 labident2 -> prPrec i 0 (concatD [doc (showString "jump"), doc (showString "if"), prt 0 val, doc (showString "then"), prt 0 labident1, doc (showString "else"), prt 0 labident2, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    ILoad a valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "load"), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IStore a val1 val2 -> prPrec i 0 (concatD [doc (showString "store"), prt 0 val1, prt 0 val2, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IFld a valident val qident -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "fldptr"), prt 0 val, prt 0 qident, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IArr a valident val1 val2 -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "elemptr"), prt 0 val1, doc (showString "["), prt 0 val2, doc (showString "]"), doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IPhi a valident phivariants -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "phi"), doc (showString "("), prt 0 phivariants, doc (showString ")"), doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+  prtListWComments _ [] = (concatD [])
+  prtListWComments _ (x:xs) = (concatD [prtWComments 0 x, prtWComments 0 xs])
+
+instance PrintWithComments (PhiVariant a) where
+  prtWComments = prt
+
+instance PrintWithComments (Call a) where
+  prtWComments = prt
+
+instance PrintWithComments (Val a) where
+  prtWComments = prt
+
+instance PrintWithComments (Op a) where
+  prtWComments = prt
+
+instance PrintWithComments (UnOp a) where
+  prtWComments = prt

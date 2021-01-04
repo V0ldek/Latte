@@ -52,5 +52,14 @@ entryLabel = LabIdent ".L_entry"
 exitLabel :: LabIdent
 exitLabel = LabIdent ".L_exit"
 
+argValIdent :: String -> ValIdent
+argValIdent s = ValIdent $ "%a_" ++ s
+
+valIdent :: String -> ValIdent
+valIdent = ValIdent . ("%v_" ++)
+
+labIdent :: String -> LabIdent
+labIdent = LabIdent . (".L_" ++)
+
 reservedNames :: [Ident]
 reservedNames = [selfSymIdent]

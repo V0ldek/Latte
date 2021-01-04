@@ -14,8 +14,8 @@
   ]
 ]
 
-.method ~cl_TopLevel.main: [
+.method int ~cl_TopLevel.main(): [
   .L_entry:
-  call ~cl_TopLevel.printString ("Hello, World!");
+  call void ~cl_TopLevel.printString ("Hello, World!");
   return 0;
 ]
