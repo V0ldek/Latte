@@ -45,8 +45,6 @@ typedef struct lat_string
     const char *contents;
 } lat_string;
 
-static const lat_string *lat_new_string_with_known_len(const char *str, size_t len);
-
 void lat_print_int(int x)
 {
     CHK_SYSERR(printf("%d\n", x), "printf")
@@ -65,13 +63,25 @@ int lat_read_int()
     return n;
 }
 
+const lat_string *lat_new_string(const char *str, size_t len)
+{
+    NOTNULL(str)
+
+    lat_string *result = malloc(sizeof(lat_string));
+    CHK_SYSERR_VAL(result, NULL, "malloc")
+    result->length = len;
+    result->contents = str;
+
+    return result;
+}
+
 const lat_string *lat_read_string()
 {
     char *line = NULL;
     size_t len = 0;
     CHK_SYSERR(getline(&line, &len, stdin), "getline");
 
-    return lat_new_string_with_known_len(line, len);
+    return lat_new_string(line, len);
 }
 
 void lat_error()
@@ -87,15 +97,6 @@ void lat_nullchk(const void *ptr)
     }
 }
 
-const lat_string *lat_new_string(const char *str)
-{
-    NOTNULL(str)
-
-    size_t len = strlen(str);
-
-    return lat_new_string_with_known_len(str, len);
-}
-
 const lat_string *lat_cat_strings(const lat_string *str1, const lat_string *str2)
 {
     lat_nullchk(str1);
@@ -108,15 +109,5 @@ const lat_string *lat_cat_strings(const lat_string *str1, const lat_string *str2
     strcpy(result, str1->contents);
     strcat(result, str2->contents);
 
-    return lat_new_string_with_known_len(result, new_length);
-}
-
-static const lat_string *lat_new_string_with_known_len(const char *str, size_t len)
-{
-    lat_string *result = malloc(sizeof(lat_string));
-    CHK_SYSERR_VAL(result, NULL, "malloc")
-    result->length = len;
-    result->contents = str;
-
-    return result;
+    return lat_new_string(result, new_length);
 }

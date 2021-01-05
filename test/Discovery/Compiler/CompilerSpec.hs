@@ -69,6 +69,8 @@ goodTest latTest =
             find (\f -> staticPath f == espressoFile "." (tstName latTest)) (staticFiles $ staticFS out)
         espOpt = staticContents $ fromJust $
             find (\f -> staticPath f == espressoOptFile "." (tstName latTest)) (staticFiles $ staticFS out)
+        asm = staticContents $ fromJust $
+            find (\f -> staticPath f == assemblyFile "." (tstName latTest)) (staticFiles $ staticFS out)
         espPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer esp
         espOptPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espOpt
     it (tstName latTest ++ " returns 0") $ LatteIO.staticCode out `shouldBe` ExitSuccess
@@ -85,6 +87,8 @@ goodTest latTest =
                 LatteIO.staticCode espOptOut `shouldBe` ExitSuccess
             it (tstName latTest ++ " optimised Espresso output is correct") $
                 normaliseOut (LatteIO.staticOut espOptOut) `shouldBe` normaliseOut (tstOut latTest)
+            it (tstName latTest ++ " x86_64 output is nonempty") $
+                null asm `shouldBe` False
         (Left s, _) -> Prelude.error (tstName latTest ++ ": " ++ s)
         (_, Left s) -> Prelude.error (tstName latTest ++ ": " ++ s)
 

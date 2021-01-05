@@ -1,10 +1,11 @@
 module X86_64.Size where
 
+import           Data.Int
 import           Espresso.Syntax.Abs
 
-data Size = Byte | Double | Quadruple deriving Eq
+data Size = Byte | Double | Quadruple deriving (Eq, Show)
 
-sizeInBytes :: Size -> Int
+sizeInBytes :: Size -> Int64
 sizeInBytes size = case size of
     Byte      -> 1
     Double    -> 4

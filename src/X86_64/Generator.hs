@@ -3,44 +3,51 @@ module X86_64.Generator (generate, combineAssembly) where
 
 import           Control.Monad.Reader
 import           Control.Monad.State
+import           Data.Bifunctor
 import           Data.List
 import qualified Data.Map                      as Map
 import           Data.Maybe
 import           Data.Ord
 import qualified Data.Set                      as Set
 import           Debug.Trace
-import           Espresso.ControlFlow.CFG      (CFG (..), Node (..))
+import           Espresso.ControlFlow.CFG      (CFG (..), Node (..), nodeTail)
 import           Espresso.ControlFlow.Liveness
 import           Espresso.Syntax.Abs
 import           Identifiers
 import           Utilities
+import           X86_64.Consts
 import qualified X86_64.Emit                   as Emit
 import           X86_64.Loc
-import           X86_64.Registers
+import           X86_64.Registers              (Reg (regHigh, regType),
+                                                RegRank (Clean, Dirty, Free),
+                                                RegState (reg, regReserved, regVals),
+                                                RegType (CalleeSaved, CallerSaved),
+                                                argReg, initialRegs, rax)
 import           X86_64.Size
 import           X86_64.Stack
 
-data Const = Const {constIdent :: String, constValue :: String}
+traceEnabled :: Bool
+traceEnabled = False
 
 data CompiledMethod = CmpMthd {
     mthdEntry    :: String,
-    mthdConsts   :: [Const],
+    mthdConsts   :: ConstSet,
     mthdPrologue :: [String],
     mthdCode     :: [String],
     mthdEpilogue :: [String]
 }
 
-data ValState = ValS {valName :: ValIdent, valSize :: Size, valLocs :: [Loc], valAliases :: [ValIdent]}
+data VarState = VarS {varName :: ValIdent, varType :: SType (), varLocs :: [Loc], varAliases :: [ValIdent]}
 
 data Store = St {
     allCode  :: [String],
     bbCode   :: [String],
-    constIdx :: Integer,
-    consts   :: [Const],
+    consts   :: ConstSet,
     stack    :: Stack,
     usedRegs :: Set.Set Reg,
     regs     :: Map.Map Reg RegState,
-    vals     :: Map.Map ValIdent ValState
+    vars     :: Map.Map ValIdent VarState,
+    traceIdx :: Integer -- debug
 }
 
 data Env = Env {
@@ -57,12 +64,15 @@ combineAssembly :: [CompiledMethod] -> String
 combineAssembly mthds =
        let code = concatMap (\m -> emitMthd m ++ "\n") mthds
            nativeExterns = unlines $ map (".extern " ++ ) [
-                "lat_print_int",
-                "lat_print_string",
-                "lat_read_int",
-                "lat_read_string",
-                "lat_error"
-            ]
+                    "lat_print_int",
+                    "lat_print_string",
+                    "lat_read_int",
+                    "lat_read_string",
+                    "lat_error",
+                    "lat_nullchk",
+                    "lat_new_string",
+                    "lat_cat_strings"
+                ]
        in
        if any (\m -> mthdEntry m == mainEntry) mthds
        then nativeExterns ++ ".global main\n\n" ++ code
@@ -74,38 +84,83 @@ combineAssembly mthds =
               in if mthdEntry mthd == mainEntry then "main:\n" ++ code else code
 
 generate :: Method a -> CFG Liveness -> CompiledMethod
-generate (Mthd _ _ qi ps _) (CFG cfg) =
-    let initState = St [] [] 0 [] emptyStack Set.empty initialRegs Map.empty
+generate (Mthd _ _ qi ps _) cfg@(CFG g) =
+    let initStack = stackReserve (map (second typeSize) locals) stackEmpty
+        initState = St [] [] constsEmpty initStack Set.empty initialRegs Map.empty 0
         st = runReader (execStateT go initState) (Env (labelFor qi) emptyLiveness)
     in  CmpMthd (toStr $ labelFor qi entryLabel) (consts st) (prologue qi st) (reverse $ allCode st) (epilogue st)
     where
         go = do
+            traceM' ("========== starting method: " ++ toStr (labelFor qi (LabIdent "")))
+            traceM' (show locals)
+            forM_ locals (uncurry newVal)
+            forM_ (map fst locals) reserveLocal
             addParams ps
-            mapM_ genNode (Map.elems cfg)
+            let nodes = Map.elems g
+                entryNode = single $ filter ((== entryLabel) . nodeLabel) nodes
+                exitNode = single $ filter ((== exitLabel) . nodeLabel) nodes
+                otherNodes = filter ((\l -> l /= entryLabel && l /= exitLabel) . nodeLabel) nodes
+            genNode entryNode
+            mapM_ genNode otherNodes
+            genNode exitNode
         genNode node = do
+            traceM' ("===== starting block: " ++ toStr (nodeLabel node))
             mapM_ genInstr (nodeCode node)
-            endBlock
+        locals = Map.toList $ persistedLocals cfg
+        reserveLocal vi = do
+            s <- gets stack
+            varS <- getVarS vi
+            let (loc, s') = stackInsertReserved vi s
+                varS' = varS {varLocs = [loc]}
+            setVarS varS'
+            modify (\st -> st {stack = s'})
 
-{-
-data ValState = ValS {valName :: ValIdent, valSize :: Size, valLocs :: [Loc], valAliases :: [ValIdent]}-}
+persistedLocals :: CFG Liveness -> Map.Map ValIdent (SType ())
+persistedLocals (CFG g) =
+    let sizes = foldr seekSize Map.empty (concatMap nodeCode (Map.elems g))
+        result = Map.restrictKeys sizes vis
+    in if Map.keysSet result /= vis
+        then error "internal error. missing sizes in persisted locals"
+        else Map.map (() <$) result
+    where
+        vis = Map.foldr (Set.union . nodePersisted) Set.empty g
+        nodePersisted node = Set.map ValIdent $ Map.keysSet $ liveOut (nodeTail node)
+        seekSize instr m = case instr of
+            IRet _ val          -> addVal val m
+            IOp _ _ val1 _ val2 -> addVal val2 (addVal val1 m)
+            ISet _ _ val        -> addVal val m
+            IUnOp _ _ _ val     -> addVal val m
+            IVCall _ call       -> addCall call m
+            ICall _ _ call      -> addCall call m
+            ICondJmp _ val _ _  -> addVal val m
+            ILoad _ _ val       -> addVal val m
+            IStore _ val1 val2  -> addVal val2 (addVal val1 m)
+            IFld _ _ val _      -> addVal val m
+            IArr _ _ val1 val2  -> addVal val2 (addVal val1 m)
+            _                   -> m
+        addVal val m = case val of
+            VVal _ t vi -> Map.insert vi t m
+            _           -> m
+        addCall (Call _ _ _ vs) m     = foldr addVal m vs
+        addCall (CallVirt _ _ _ vs) m = foldr addVal m vs
 
 prologue :: QIdent a -> Store -> [String]
 prologue qi st =
-    let locs = stackSize $ stack st
+    let locs = stackReservedSize $ stack st
         savedRegs = sort $ filter (\r -> regType r == CalleeSaved) $ Set.elems $ usedRegs st
     in [
-        Emit.sanitise (toStr (labelFor qi (LabIdent ""))) ++ ":",
-        "  push %rbp",
-        "  movq %rsp, %rbp"
+        Emit.sanitise (toStr (labelFor qi (LabIdent ""))) ++ ":"
     ] ++ map (\r -> "  push %" ++ regHigh r) savedRegs ++ [
+        "  push %rbp",
+        "  movq %rsp, %rbp",
         "  subq $" ++ show locs ++ ", %rsp"
     ]
 
 epilogue :: Store -> [String]
 epilogue st =
     let savedRegs = sortOn Down $ filter (\r -> regType r == CalleeSaved) $ Set.elems $ usedRegs st
-    in map (\r -> "  pop %" ++ regHigh r) savedRegs ++ [
-        "  leave",
+    in ["  leave"] ++
+        map (\r -> "  pop %" ++ regHigh r) savedRegs ++ [
         "  ret"
     ]
 
@@ -113,15 +168,16 @@ addParams :: [Param a] -> GenM ()
 addParams ps = mapM_ (uncurry addParam) (zip ps [0..])
     where
         addParam (Param _ t vi) idx = do
-            let size = typeSize t
-                mbreg = argReg idx
-            _ <- newVal vi size
+            let mbreg = argReg idx
+            _ <- newVal vi (() <$ t)
             case mbreg of
                 Just reg_ -> saveInReg vi reg_
                 Nothing   -> do
-                    valS <- getValS vi
-                    let valS' = valS {valLocs = [LocStack (-fromInteger idx * 8)]}
-                    setValS valS'
+                    varS <- getVarS vi
+                    let -- Each argument takes 8 bytes, plus 16 for rbp and the return address.
+                        stackLoc = LocStack $ (fromInteger idx - 6) * 8 + 16
+                        varS' = varS {varLocs = [stackLoc]}
+                    setVarS varS'
 
 {-
 data Instr a
@@ -143,6 +199,11 @@ data Instr a
     | IPhi a ValIdent [PhiVariant a]
   deriving (Eq, Ord, Show, Read, Foldable)
 -}
+{-
+czemu tak trudno
+assembler generować
+termin nadchodzi
+-}
 genInstr :: Instr Liveness -> GenM ()
 genInstr instr =
     let live = single instr
@@ -158,63 +219,95 @@ genInstr instr =
             IVRet _ -> return ()
             IRet _ val -> do
                 moveToReg val rax
-                reserveReg rax
-                freeNotAlive
+                resetStack
+                endBlock
             IOp _ vi v1 op v2 -> case op of
                 OpAdd _ -> do
-                    newVal vi Double
+                    newVal vi (Int ())
                     reg_ <- moveToAnyReg v1
                     loc2 <- getValLoc v2
-                    valS <- getValS vi
+                    varS <- getVarS vi
                     freeNotAlive
                     freeReg reg_
                     Emit.add loc2 (LocReg reg_)
-                    let valS' = valS {valLocs = [LocReg reg_]}
-                    setValS valS'
+                    let varS' = varS {varLocs = [LocReg reg_]}
+                    setVarS varS'
                 _       -> error $ "unimplemented" ++ show instr
             ISet _ vi v -> do
-                size <- getValSize v
-                newVal vi size
-                valS <- getValS vi
-                valS' <- case v of
-                    VInt _ n -> return $ valS {valLocs = [LocImm (fromInteger n)]}
-                    VNegInt _ n -> return $ valS {valLocs = [LocImm (fromInteger $ -n)]}
-                    VTrue _ -> return $ valS {valLocs = [LocImm 1]}
-                    VFalse _ -> return $ valS {valLocs = [LocImm 0]}
+                let t = () <$ valType v
+                newVal vi t
+                varS <- getVarS vi
+                varS' <- case v of
+                    VInt _ n -> return $ varS {varLocs = [LocImm (fromInteger n)]}
+                    VNegInt _ n -> return $ varS {varLocs = [LocImm (fromInteger $ -n)]}
+                    VTrue _ -> return $ varS {varLocs = [LocImm 1]}
+                    VFalse _ -> return $ varS {varLocs = [LocImm 0]}
                     VVal _ _ othVi -> do
-                        othValS <- getValS othVi
-                        let othValS' = othValS {valAliases = vi:valAliases othValS}
-                            rs = map asReg $ filter isReg (valLocs othValS')
+                        othVarS <- getVarS othVi
+                        let othVarS' = othVarS {varAliases = vi:varAliases othVarS}
+                            rs = map asReg $ filter isReg (varLocs othVarS')
                         regSs <- mapM getRegS rs
                         let regSs' = map (\r -> r {regVals = vi:regVals r}) regSs
                         mapM_ setRegS regSs'
-                        setValS othValS'
-                        return $ valS {valLocs = valLocs othValS', valAliases = valAliases othValS'}
+                        setVarS othVarS'
+                        return $ varS {varLocs = varLocs othVarS', varAliases = varAliases othVarS'}
                     _ -> error "lalala"
-                setValS valS'
+                setVarS varS'
                 freeNotAlive
+            IUnOp _ vi op v -> case op of
+                UnOpNeg _ -> do
+                    let t = () <$ valType v
+                    newVal vi t
+                    varS <- getVarS vi
+                    varS' <- case v of
+                        VInt _ n -> return $ varS {varLocs = [LocImm (fromInteger (-n))]}
+                        VNegInt _ n -> return $ varS {varLocs = [LocImm (fromInteger n)]}
+                        VVal {} -> do
+                            reg_ <- moveToAnyReg v
+                            freeNotAlive
+                            freeReg reg_
+                            Emit.neg reg_
+                            return $ varS {varLocs = [LocReg reg_]}
+                        _ -> error "internal error. invalid operand to UnOpNeg."
+                    setVarS varS'
+                    freeNotAlive
+                _ -> error "unimplemented"
             IVCall _ call -> do
                 genCall call
                 freeNotAlive
             ICall _ vi call -> do
                 genCall call
-                -- TODO: size
-                newVal vi Quadruple
+                let t = case call of
+                            Call _ t' _ _     -> t'
+                            CallVirt _ t' _ _ -> t'
+                newVal vi (() <$ t)
                 saveInReg vi rax
                 freeNotAlive
             ICondJmp _ v l1 l2 -> do
                 loc <- getValLoc v
                 l1' <- label l1
                 l2' <- label l2
-                Emit.test loc loc
-                freeNotAlive
-                saveLiveVals
-                Emit.je l1'
-                Emit.jmp l2'
+                resetStack
+                case loc of
+                    LocImm 0 -> do
+                        saveBetweenBlocks
+                        endBlock
+                        Emit.jmp l2'
+                    LocImm 1 -> do
+                        saveBetweenBlocks
+                        endBlock
+                        Emit.jmp l1'
+                    _ -> do
+                        Emit.test loc loc
+                        saveBetweenBlocks
+                        endBlock
+                        Emit.jz l2'
+                        Emit.jmp l1'
             IJmp _ li -> do
-                freeNotAlive
-                saveLiveVals
                 li' <- label li
+                resetStack
+                saveBetweenBlocks
+                endBlock
                 Emit.jmp li'
             IPhi {} -> error "internal error. phi should be eliminated before assembly codegen"
             _ -> error $ "unimplemented " ++ show instr
@@ -225,18 +318,36 @@ genInstr instr =
 genCall :: Call a -> GenM ()
 genCall call = case call of
     Call _ _ qi args -> do
-        let argRegs = zip args (map argReg [0..])
+        let argsWithRegs = zip args (map argReg [0..])
+            (args1, args2) = partition (isJust . snd) argsWithRegs
+            argsInRegs = map (second fromJust) args1
+            argsOnStack = map fst args2
             callIdent = getCallTarget qi
         callerSavedRegs <- gets (filter (\r -> regType r == CallerSaved) . Map.keys . regs)
-        forM_ argRegs (uncurry passArg)
+        forM_ argsInRegs (uncurry passInReg)
         forM_ callerSavedRegs reserveReg
         forM_ callerSavedRegs freeReg
         forM_ callerSavedRegs unreserveReg
+        stackBefore <- gets (stackOverheadSize . stack)
+        locs <- mapM prepOnStack (reverse argsOnStack)
+        alignStack
+        stackAfter <- gets (stackOverheadSize . stack)
+        forM_ locs (`Emit.push` "passing arg")
         Emit.call callIdent
+        Emit.decrStack (stackAfter - stackBefore)
+        modify (\st -> st{stack = (stack st){stackOverheadSize = stackBefore}})
     CallVirt {}    -> error "callvirt not implemented"
-    where passArg val mbreg = case mbreg of
-                        Just reg_ -> moveToReg val reg_
-                        Nothing   -> error "calls over 6 args not implemented"
+    where passInReg val reg_ = moveToReg val reg_
+          prepOnStack val = do
+              s <- gets stack
+              loc <- getValLoc val
+              let s' = stackPushUnnamed Quadruple s -- TODO: make sure quadruple is necessary
+              modify (\st -> st{stack = s'})
+              return loc
+          alignStack = do
+              (misalignment, s) <- gets (stackAlign16 . stack)
+              Emit.incrStack misalignment "16 bytes alignment"
+              modify (\st -> st{stack = s})
 
 getCallTarget :: QIdent a -> String
 getCallTarget (QIdent _ (SymIdent i1) (SymIdent i2)) =
@@ -253,31 +364,31 @@ getCallTarget (QIdent _ (SymIdent i1) (SymIdent i2)) =
 freeNotAlive :: GenM ()
 freeNotAlive = do
     live <- asks liveness
-    vis <- gets (Map.keys . vals)
+    vis <- gets (Map.keys . vars)
     let freeIfNotAlive vi = unless (Set.member (toStr vi) (Map.keysSet (liveOut live))) (free vi)
     forM_ vis freeIfNotAlive
 
 free :: ValIdent -> GenM ()
 free vi = do
-    mbvalS <- lookupValS vi
-    case mbvalS of
-        Just valS -> do
-            forM_ (valLocs valS) (freeFromLoc valS)
-            valsMap <- gets vals
-            let valsMap' = Map.map (\vs -> vs {valAliases = filter (/= vi) (valAliases vs)}) $
-                    Map.delete vi valsMap
-            modify (\st -> st {vals = valsMap'})
+    mbvarS <- lookupVarS vi
+    case mbvarS of
+        Just varS -> do
+            forM_ (varLocs varS) (freeFromLoc varS)
+            varsMap <- gets vars
+            let varsMap' = Map.map (\vs -> vs {varAliases = filter (/= vi) (varAliases vs)}) $
+                    Map.adjust (\vs -> vs {varAliases = [vi], varLocs = []}) vi varsMap
+            modify (\st -> st {vars = varsMap'})
         Nothing -> return ()
 
-freeFromLoc :: ValState -> Loc -> GenM ()
-freeFromLoc valS loc = case loc of
+freeFromLoc :: VarState -> Loc -> GenM ()
+freeFromLoc varS loc = case loc of
     LocReg reg_ -> do
         regS <- getRegS reg_
-        let regS' = regS {regVals = filter (/= valName valS) (regVals regS)}
+        let regS' = regS {regVals = filter (/= varName varS) (regVals regS)}
         setRegS regS'
-    LocStack n -> do
+    LocStack _ -> do
         s <- gets stack
-        let s' = stackRemove n (valSize valS) s
+        let s' = stackDelete (varName varS) s
         modify (\st -> st {stack = s'})
     _ -> return ()
 
@@ -285,7 +396,7 @@ moveToReg :: Val a -> Reg -> GenM ()
 moveToReg val reg_ = do
     freeReg reg_
     loc <- getValLoc val
-    size <- getValSize val
+    let size = valSize val
     comment <- case val of
         VVal _ _ vi -> saveInReg vi reg_ >> return ("moving " ++ toStr vi)
         _           -> return ""
@@ -298,23 +409,26 @@ moveToAnyReg val = do
         Just reg_ -> return reg_
         Nothing   -> do
             reg_ <- chooseReg
+            regS <- getRegS reg_
+            forM_ (regVals regS) saveOnStack
             moveToReg val reg_
             return reg_
         where chooseReg = do
                 regSs <- gets (filter (not . regReserved) . Map.elems . regs)
                 ranks <- mapM rankReg regSs
+                traceM' ("Length of regSs: " ++ show (length regSs))
                 return $ reg $ fst $ minimumBy (comparing snd) (zip regSs ranks)
               rankReg regS = if null $ regVals regS then return $ Free (regType $ reg regS)
                              else do
                                 live <- asks liveness
-                                let nextUse = minimum $ map (\vi -> liveOut live Map.! toStr vi) (regVals regS)
-                                valSs <- mapM getValS (regVals regS)
-                                return $ if any (all isStack . valLocs) valSs
-                                    then Dirty nextUse
-                                    else Clean nextUse
+                                let nextUse = minimum $ map (\vi -> liveIn live Map.! toStr vi) (regVals regS)
+                                varSs <- mapM getVarS (regVals regS)
+                                return $ if all (any isStack . varLocs) varSs
+                                    then Clean nextUse
+                                    else Dirty nextUse
 
-isLiveAfter :: ValIdent -> Liveness -> Bool
-isLiveAfter vi live = Map.member (toStr vi) (liveOut live)
+isLiveDuring :: ValIdent -> Liveness -> Bool
+isLiveDuring vi live = Map.member (toStr vi) (liveIn live)
 
 getValLoc :: Val a -> GenM Loc
 getValLoc val = case val of
@@ -323,36 +437,31 @@ getValLoc val = case val of
     VFalse _    -> return $ LocImm 0
     VNegInt _ n -> return $ LocImm (-(fromInteger n))
     VVal _ _ vi -> do
-        valS <- getValS vi
-        return $ case sort $ valLocs valS of
-            []  -> error $ "no locations for val " ++ toStr vi
+        varS <- getVarS vi
+        return $ case sort $ varLocs varS of
+            []  -> error $ "no locations for var " ++ toStr vi
             x:_ -> x
     _ -> error "lalala"
-
-getValReg :: Val a -> GenM (Maybe Reg)
-getValReg val = case val of
-    VVal _ _ vi -> do
-        valS <- getValS vi
-        return $ asReg <$> find isReg (valLocs valS)
-    _ -> return Nothing
 
 getValUnreservedReg :: Val a -> GenM (Maybe Reg)
 getValUnreservedReg val = case val of
     VVal _ _ vi -> do
-        valS <- getValS vi
-        let regLocs = filter isReg (valLocs valS)
+        varS <- getVarS vi
+        let regLocs = filter isReg (varLocs varS)
         regSs <- mapM (getRegS . asReg) regLocs
         return $ reg <$> find (not . regReserved) regSs
     _ -> return Nothing
 
 reserveReg :: Reg -> GenM ()
 reserveReg reg_ = do
+    traceM' $ "reserving " ++ regHigh reg_
     regS <- getRegS reg_
     let regS' = regS {regReserved = True}
     setRegS regS'
 
 unreserveReg :: Reg -> GenM ()
 unreserveReg reg_ = do
+    traceM' $ "unreserving " ++ regHigh reg_
     regS <- getRegS reg_
     let regS' = regS {regReserved = False}
     setRegS regS'
@@ -362,19 +471,20 @@ freeReg reg_ = do
     regS <- getRegS reg_
     reserveReg reg_
     forM_ (regVals regS) go
+    when (not $ regReserved regS) (traceM' $ "unreserving " ++ regHigh reg_)
     setRegS (regS {regVals = []}) -- sets reserve state back
     where
         go vi = do
             secureValue vi
-            valS <- getValS vi
-            let valS' = valS {valLocs = filter (\r -> r /= LocReg reg_) (valLocs valS)}
-            setValS valS'
+            varS <- getVarS vi
+            let varS' = varS {varLocs = filter (\r -> r /= LocReg reg_) (varLocs varS)}
+            setVarS varS'
 
 secureValue :: ValIdent -> GenM ()
 secureValue vi = do
     live <- asks liveness
-    valS <- getValS vi
-    when (isLiveAfter vi live && all isReg (valLocs valS)) (void $ moveToAnyReg (VVal () undefined vi))
+    varS <- getVarS vi
+    when (isLiveDuring vi live && all isReg (varLocs varS)) (void $ moveToAnyReg (VVal () (varType varS) vi))
 
 labelFor :: QIdent a -> LabIdent -> LabIdent
 labelFor (QIdent _ (SymIdent i1) (SymIdent i2)) (LabIdent l1) = LabIdent $ i1 ++ "." ++ i2 ++ l1
@@ -383,17 +493,17 @@ saveInReg :: ValIdent -> Reg -> GenM ()
 saveInReg vi reg_ = do
     regS <- useReg reg_
     freeReg reg_
-    valS <- getValS vi
+    varS <- getVarS vi
     when (regReserved regS) (error $ "internal error. attempt to use reserved register " ++ regHigh reg_)
-    let valS' = valS {valLocs = LocReg reg_ : valLocs valS}
-        regS' = regS {regVals = valAliases valS}
-    setValS valS'
+    let varS' = varS {varLocs = LocReg reg_ : varLocs varS}
+        regS' = regS {regVals = varAliases varS}
+    setVarS varS'
     setRegS regS'
 
-newVal :: ValIdent -> Size -> GenM ()
-newVal vi size = do
+newVal :: ValIdent -> SType () -> GenM ()
+newVal vi t = do
     free vi
-    setValS $ ValS vi size [] [vi]
+    setVarS $ VarS vi t [] [vi]
 
 useReg :: Reg -> GenM RegState
 useReg reg_ = do
@@ -406,84 +516,119 @@ useReg reg_ = do
             setRegS regS
             return regS
 
-getValS :: ValIdent -> GenM ValState
-getValS vi = do
-    mb <- gets ((Map.lookup vi) . vals)
+getVarS :: ValIdent -> GenM VarState
+getVarS vi = do
+    mb <- gets (Map.lookup vi . vars)
     case mb of
-        Nothing -> error $ "lalalalalala2" ++ show vi
+        Nothing -> error $ "internal error. no varS for var " ++ show vi
         Just g  -> return g
 
-lookupValS :: ValIdent -> GenM (Maybe ValState)
-lookupValS vi = gets (Map.lookup vi . vals)
+lookupVarS :: ValIdent -> GenM (Maybe VarState)
+lookupVarS vi = gets (Map.lookup vi . vars)
 
 getRegS :: Reg -> GenM RegState
 getRegS reg_ = do
-    mb <- gets ((Map.lookup reg_) . regs)
+    mb <- gets (Map.lookup reg_ . regs)
     case mb of
-        Nothing -> error $ "dupalalalalala3" ++ show (regHigh reg_)
+        Nothing -> error $ "internal error. no regS for reg " ++ show (regHigh reg_)
         Just g  -> return g
 
-setValS :: ValState -> GenM ()
-setValS valS = modify (\st -> st {vals = Map.insert (valName valS) valS (vals st)})
+setVarS :: VarState -> GenM ()
+setVarS varS = modify (\st -> st {vars = Map.insert (varName varS) varS (vars st)})
 
 setRegS :: RegState -> GenM ()
 setRegS regS = modify (\st -> st {regs = Map.insert (reg regS) regS (regs st)})
 
-saveLiveVals :: GenM ()
-saveLiveVals = do
-    vis <- gets (Map.keys . vals)
-    mapM_ saveOnStack vis
-    rs <- gets (Map.keys . regs)
-    mapM_ freeReg rs
+saveBetweenBlocks :: GenM ()
+saveBetweenBlocks = do
+    locals <- gets (map fst . stackReservedLocs . stack)
+    forM_ locals (\vi -> unlessM (gets (stackContains vi . stack)) (saveOnStack vi))
 
 saveOnStack :: ValIdent -> GenM ()
 saveOnStack vi = do
-    valS <- getValS vi
+    varS <- getVarS vi
     s <- gets stack
-    let (s', loc) = stackPush (valSize valS) s
-        mbsrcLoc = nonStackLoc valS
+    let mbsrcLoc = nonStackLoc varS
     case mbsrcLoc of
         Nothing     -> return ()
+        Just srcLoc | stackIsValueReserved vi s -> do
+            let (loc@(LocStack n), s') = stackInsertReserved vi s
+            Emit.movToStack (varSize varS) srcLoc n ("save " ++ toStr vi ++ "")
+            let varS' = varS {varLocs = loc : varLocs varS}
+            setVarS varS'
+            modify (\st -> st {stack = s'})
         Just srcLoc -> do
-            let valS' = valS {valLocs = LocStack loc : valLocs valS}
-            Emit.movToStack (valSize valS) srcLoc loc ("save " ++ toStr vi ++ "")
-            setValS valS'
+            let (loc, s') = stackPush vi Quadruple s
+            Emit.push srcLoc ("spill " ++ toStr vi)
+            let varS' = varS {varLocs = loc : varLocs varS}
+            setVarS varS'
             modify (\st -> st {stack = s'})
 
-nonStackLoc :: ValState -> Maybe Loc
-nonStackLoc valS = find isNonStack (valLocs valS)
+nonStackLoc :: VarState -> Maybe Loc
+nonStackLoc varS = find isNonStack (varLocs varS)
 
-getValSize :: Val a -> GenM Size
-getValSize val = case val of
-    VInt _  _   -> return Double
-    VTrue _     -> return Byte
-    VFalse _    -> return Byte
-    VNull _     -> return Quadruple
-    VVal _ _ vi -> getValS vi >>= (return . valSize)
-    _           -> error "lalala"
+valSize :: Val a -> Size
+valSize val = case val of
+    VInt _  _  -> Double
+    VTrue _    -> Byte
+    VFalse _   -> Byte
+    VNull _    -> Quadruple
+    VVal _ t _ -> typeSize t
+    _          -> error "lalala"
+
+valType :: Val a -> SType a
+valType val = case val of
+    VInt a _    -> Int a
+    VNegInt a _ -> Int a
+    VStr a _    -> Str a
+    VTrue a     -> Bool a
+    VFalse a    -> Bool a
+    VNull {}    -> error "fixmeee"
+    VVal _ t _  -> t
+
+varSize :: VarState -> Size
+varSize varS = typeSize $ varType varS
 
 label :: LabIdent -> GenM LabIdent
 label l = asks (`labelGen` l)
 
-endBlock :: GenM ()
-endBlock = modify (\st -> st {allCode = bbCode st ++ allCode st, bbCode = []})
+resetStack :: GenM ()
+resetStack = do
+    s <- gets stack
+    let (n, s') = stackClearOverhead s
+    Emit.decrStack n
+    modify (\st -> st {stack = s'})
 
-newConst :: String -> GenM Const
-newConst s = do
-    n <- gets constIdx
-    modify (\st -> st {constIdx = n + 1})
-    return $ Const ("__const_" ++ show n) s
+endBlock :: GenM ()
+endBlock = do
+    locals <- gets (stackReservedSlots . stack)
+    varSs <- gets vars
+    let varSs' = Map.mapWithKey (\vi slot -> VarS {
+                varName = vi,
+                varType = varType $ varSs Map.! vi,
+                varLocs = [slotToLoc slot],
+                varAliases = [vi]}) locals
+    modify (\st -> st {allCode = bbCode st ++ allCode st,
+                       bbCode = [],
+                       regs = initialRegs,
+                       vars = varSs'})
 
 -- Debug
 
 fullTrace :: GenM ()
 fullTrace = do
-    idx <- gets constIdx
-    modify (\st -> st{constIdx = idx + 1})
-    traceM ("tick " ++ show idx)
     live <- asks liveness
-    traceM ("live: " ++ show (Set.elems $ Map.keysSet $ liveOut live))
-    valSs <- gets (Map.elems . vals)
-    mapM_ (\vs -> traceM  ("value " ++ toStr (valName vs) ++ ", "
-            ++ "aliases: " ++ intercalate ", " (map toStr (valAliases vs))
-            ++ " locs: " ++ intercalate ", " (map show (valLocs vs)))) valSs
+    traceM' ("live: " ++ show (Set.elems $ Map.keysSet $ liveOut live))
+    varSs <- gets (Map.elems . vars)
+    s <- gets stack
+    traceM' ("stack: " ++ show (Map.toList $ stackOccupiedSlots s) ++ ", " ++ show (stackReservedSize s) ++ " + " ++ show (stackOverheadSize s))
+    mapM_ (\vs -> traceM' ("value " ++ toStr (varName vs) ++ ", "
+            ++ "aliases: " ++ intercalate ", " (map toStr (varAliases vs))
+            ++ " locs: " ++ intercalate ", " (map show (varLocs vs)))) varSs
+
+traceM' :: String -> GenM ()
+traceM' s = when traceEnabled (do
+    idx <- gets traceIdx
+    modify (\st -> st{traceIdx = idx + 1})
+    traceM ("{" ++ show idx ++ "}  " ++ s)
+    )

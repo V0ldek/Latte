@@ -3,7 +3,7 @@ module X86_64.Loc where
 import           Data.Int
 import           X86_64.Registers
 
-data Loc = LocImm Int32 | LocConst String | LocReg Reg | LocStack Int  deriving (Eq, Show)
+data Loc = LocImm Int32 | LocConst String | LocReg Reg | LocStack Int64  deriving (Eq, Show)
 
 -- This is the same as deriving, but we rely on this ordering so it is stated explicitly.
 -- When extracting a value from a location we want the cheapest possibilities first,

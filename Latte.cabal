@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: be9e3996c4bd0337ecf24acea0453a856cb4e5ea48d2aeac05a9005cd443ee29
+-- hash: e6604d4d52f5a5ece6040d707c4974ac74620fa8b272f50a16cecf5e8883b406
 
 name:           Latte
 version:        0.9.0.0
@@ -52,6 +52,7 @@ library
       Syntax.Printer
       Syntax.Rewriter
       Utilities
+      X86_64.Consts
       X86_64.Emit
       X86_64.Generator
       X86_64.Loc
@@ -77,7 +78,7 @@ library
 executable espi
   main-is: Espi.hs
   other-modules:
-      Latc
+      Latc_x86_64
       Paths_Latte
   hs-source-dirs:
       app
@@ -94,14 +95,34 @@ executable espi
     , process >=1.6 && <1.7
   default-language: Haskell2010
 
-executable latc
-  main-is: Latc.hs
+executable latc_x86_64
+  main-is: Latc_x86_64.hs
   other-modules:
       Espi
       Paths_Latte
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Latc -Wall
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Latc_x86_64 -Wall
+  build-depends:
+      Latte
+    , array >=0.5 && <0.6
+    , base >=4.7 && <5
+    , containers >=0.6 && <0.7
+    , directory >=1.3 && <1.4
+    , filepath >=1.4 && <1.5
+    , hspec >=2.7 && <2.8
+    , mtl >=2.2 && <2.3
+    , process >=1.6 && <1.7
+  default-language: Haskell2010
+
+test-suite Latte-exec-test
+  type: exitcode-stdio-1.0
+  main-is: X86_64Spec.hs
+  other-modules:
+      Paths_Latte
+  hs-source-dirs:
+      test/Exec
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is X86_64Spec -Wall
   build-depends:
       Latte
     , array >=0.5 && <0.6
@@ -122,7 +143,7 @@ test-suite Latte-test
       Espresso.InterpreterSpec
       Paths_Latte
   hs-source-dirs:
-      test
+      test/Discovery
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       Latte

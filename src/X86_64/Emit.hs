@@ -19,7 +19,7 @@ emitComment :: String -> String
 emitComment [] = []
 emitComment s  = ' ':'#':' ':s
 
-movToStack :: EmitM m => Size -> Loc -> Int -> String -> m ()
+movToStack :: EmitM m => Size -> Loc -> Int64 -> String -> m ()
 movToStack size src stackDest comment = case src of
     LocReg reg_ -> emitInd $ bin "mov" size (sizedReg size reg_) (stack stackDest) comment
     LocImm int  -> emitInd $ bin "mov" size (lit int) (stack stackDest) comment
@@ -43,23 +43,35 @@ add src dest =
         (LocStack _, LocStack _) -> error "internal error. add from stack to stack"
         _ -> emitInd $ bin "add" Double srcString destString ""
 
+neg :: EmitM m => Reg -> m ()
+neg reg_ = emitInd $ "neg" ++ sizeSuf Double ++ " " ++ sizedReg Double reg_
+
 test :: EmitM m => Loc -> Loc -> m ()
 test op1 op2 =
     let op1String = emitLoc Byte op1
         op2String = emitLoc Byte op2
     in emitInd $ bin "test" Byte op1String op2String ""
 
-je :: EmitM m => LabIdent -> m ()
-je (LabIdent l) = emitInd $ "je " ++ sanitise l
+jz :: EmitM m => LabIdent -> m ()
+jz (LabIdent l) = emitInd $ "jz " ++ sanitise l
 
 call :: EmitM m => String -> m ()
 call f = emitInd $ "call " ++ sanitise f
 
-decrStack :: EmitM m => Int32 -> m ()
-decrStack n = emitInd $ "addq " ++ lit n ++ ", %rsp"
+push :: EmitM m => Loc -> String -> m ()
+push srcloc comment = emitInd $ "push " ++ emitLoc Quadruple srcloc ++ emitComment comment
+
+incrStack :: EmitM m => Int64 -> String -> m ()
+incrStack n comment = emitInd $ "subq " ++ lit64 n ++ ", %rsp" ++ emitComment comment
+
+decrStack :: EmitM m => Int64 -> m ()
+decrStack n = emitInd $ "addq " ++ lit64 n ++ ", %rsp"
 
 lit :: Int32 -> String
 lit n = '$':show n
+
+lit64 :: Int64 -> String
+lit64 n = '$':show n
 
 sizedReg :: Size -> Reg -> String
 sizedReg size r = case size of
@@ -70,7 +82,7 @@ sizedReg size r = case size of
 reg :: String -> String
 reg r = '%':r
 
-stack :: Int -> String
+stack :: Int64 -> String
 stack n = show n ++ "(%rbp)"
 
 bin :: String -> Size -> String -> String -> String -> String

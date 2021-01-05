@@ -30,12 +30,12 @@ instance Ord RegRank where
         (Free rt1, Free rt2)   -> compare rt1 rt2
         (Clean n1, Clean n2)   -> compare n2 n1
         (Dirty n1, Dirty n2)   -> compare n2 n1
-        (Free CallerSaved, _)  -> LT
-        (_, Free CallerSaved ) -> GT
         (Free CalleeSaved, _)  -> LT
         (_, Free CalleeSaved ) -> GT
-        (Clean _, _)           -> LT
-        (_, Clean _)           -> GT
+        (Free CallerSaved, _)  -> LT
+        (_, Free CallerSaved ) -> GT
+        (Clean c, Dirty d)     -> if d < c then GT else LT
+        (Dirty d, Clean c)     -> if d < c then LT else GT
 
 emptyState :: Reg -> RegState
 emptyState r = RegS r False []

@@ -57,9 +57,7 @@ ffirst :: (Foldable f) => f a -> Maybe a
 ffirst = find (const True)
 
 single :: (Foldable f) => f a -> a
-single xs = case ffirst xs of
-    Nothing -> error "single: empty structure"
-    Just x  -> x
+single xs = fromMaybe (error "single: empty structure") (ffirst xs)
 
 fixpoint :: (Eq a) => (a -> a) -> a -> a
 fixpoint f x = let x' = f x in if x == x' then x else fixpoint f x'

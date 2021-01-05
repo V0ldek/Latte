@@ -356,7 +356,7 @@ defaultVal t = case deref t of
     Bool _  -> VFalse ()
     Cl _ _  -> VNull ()
     Arr _ _ -> VNull ()
-    _       -> error "invalid type"
+    _       -> error $ "invalid type " ++ show (() <$ t)
 
 deref :: SType a -> SType a
 deref t = case t of
@@ -385,15 +385,17 @@ codeLines stmt = do
 
 toSType :: Latte.Type a -> SType a
 toSType t = case t of
-    Latte.Int a    -> Int a
-    Latte.Str a    -> Str a
-    Latte.Bool a   -> Bool a
-    Latte.Void a   -> Void a
-    Latte.Var {}   -> error "not a simple type 'var'"
-    Latte.Arr a t' -> Arr a (toSType t')
-    Latte.Cl a i   -> Cl a (toSymIdent i)
-    Latte.Fun{}    -> error "not a simple type Fun"
-    Latte.Ref a t' -> Ref a (toSType t')
+    Latte.Int a                -> Int a
+    Latte.Str a                -> Ref a (Str a)
+    Latte.Bool a               -> Bool a
+    Latte.Void a               -> Void a
+    Latte.Var {}               -> error "not a simple type 'var'"
+    Latte.Arr a t'             -> Arr a (toSType t')
+    Latte.Cl a i               -> Cl a (toSymIdent i)
+    Latte.Fun{}                -> error "not a simple type Fun"
+    Latte.Ref _ (Latte.Int a)  -> Int a
+    Latte.Ref _ (Latte.Bool a) -> Bool a
+    Latte.Ref a t'             -> Ref a (deref $ toSType t')
 
 toFType :: Latte.Type a -> FType a
 toFType t = case t of

@@ -76,8 +76,7 @@ run opt = do
     genStep opt (espressoOptWithUnfoldedPhiFile directory fileName) espressoWithUnfoldedPhi
     printStringV v "Generating x86_64 assembly..."
     let assembledMthds = map (\(g, mthd) -> generate mthd g) cfgsWithUnfoldedPhi
-    genStep opt (assemblyFile directory fileName) (combineAssembly assembledMthds)
-    exitSuccess
+    genOutput opt (assemblyFile directory fileName) (combineAssembly assembledMthds)
 
 analysePhase :: (Monad m, LatteIO m) => Options -> String -> m (Metadata SemData)
 analysePhase opt latSrc = do
@@ -121,6 +120,12 @@ genStep opt fp contents = do
         printStringV v $ "Writing " ++ show fp ++ "..."
         LatteIO.writeFile fp contents
 
+genOutput :: (Monad m, LatteIO m) => Options -> FilePath -> String -> m ()
+genOutput opt fp contents = do
+    let v = verbosity opt
+    printStringV v $ "Writing " ++ show fp ++ "..."
+    LatteIO.writeFile fp contents
+
 failNoDirectory :: (Monad m, LatteIO m) => FilePath -> m ()
 failNoDirectory d = printErrorString ("Directory not found: " ++ show d) >> exitFailure
 
@@ -158,10 +163,8 @@ showCfgsWithLiveness cfgs = unlines $ map showCfg cfgs
     showCfg (CFG g, Esp.Mthd _ _ (Esp.QIdent _ (Esp.SymIdent i1) (Esp.SymIdent i2)) _ _) =
       "CFG for " ++ i1 ++ "." ++ i2 ++ ":\n" ++ show (CFG g) ++ concatMap showLiveness (Map.elems g)
     showLiveness node =
-        let firstInstr = head $ nodeCode node
-            lastInstr = last $ nodeCode node
-        in "Liveness at start of " ++ toStr (nodeLabel node) ++ ": " ++ show (single firstInstr) ++ "\n" ++
-           "Liveness at end of " ++ toStr (nodeLabel node) ++ ": " ++ show (single lastInstr) ++ "\n"
+        "Liveness at start of " ++ toStr (nodeLabel node) ++ ": " ++ show (nodeHead node) ++ "\n" ++
+           "Liveness at end of " ++ toStr (nodeLabel node) ++ ": " ++ show (nodeTail node) ++ "\n"
 
 showEspWithLiveness :: Esp.Metadata a -> [Esp.Method Liveness] -> String
 showEspWithLiveness meta mthds = PrintEsp.printTreeWithInstrComments (Esp.Program emptyLiveness (emptyLiveness <$ meta) mthds)

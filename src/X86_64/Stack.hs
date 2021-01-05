@@ -1,46 +1,75 @@
 module X86_64.Stack where
 
-import           Data.List   (delete, minimumBy, sort)
+import           Data.Int
+import           Data.List
+import qualified Data.Map            as Map
+import           Espresso.Syntax.Abs
+import           Identifiers
+import           X86_64.Loc
 import           X86_64.Size
 
-type Hole = (Int, Int)
+data Stack = Stack {
+    stackReservedSize  :: Int64,
+    stackReservedSlots :: Map.Map ValIdent Slot,
+    stackOverheadSize  :: Int64,
+    stackOccupiedSlots :: Map.Map ValIdent Slot}
 
-data Stack = Stack {stackContents :: [Hole], stackSize :: Int} deriving Show
+data Slot = Slot {slotOffset :: Int64, slotSize :: Size} deriving Show
 
-emptyStack :: Stack
-emptyStack = Stack [] 0
+stackEmpty :: Stack
+stackEmpty = Stack 0 Map.empty 0 Map.empty
 
-stackPush :: Size -> Stack -> (Stack, Int)
-stackPush size stack =
-    case findHole size stack of
-        Nothing -> (stack {stackSize = stackSize stack + sizeInBytes size}, -stackSize stack - sizeInBytes size)
-        Just h@(f, _) -> (shrinkHole h size stack, -f - sizeInBytes size)
+stackReserve :: [(ValIdent, Size)] -> Stack -> Stack
+stackReserve vals sInit = foldl' reserveOne sInit vals
+    where reserveOne s (vi, size) =
+            let sizeBefore = stackReservedSize s
+                bytes = sizeInBytes size
+                slot = Slot (-sizeBefore - bytes) size
+            in  s {stackReservedSize = sizeBefore + bytes,
+                   stackReservedSlots = Map.insert vi slot (stackReservedSlots s),
+                   stackOccupiedSlots = Map.insert vi slot (stackOccupiedSlots s)}
 
-stackRemove :: Int -> Size -> Stack -> Stack
-stackRemove offset size = addHole (-offset - sizeInBytes size, -offset)
+stackReservedLocs :: Stack -> [(ValIdent, Loc)]
+stackReservedLocs s = Map.toList $ Map.map slotToLoc (stackReservedSlots s)
 
-addHole :: Hole -> Stack -> Stack
-addHole h stack = stackNormalise $ stack { stackContents = h:stackContents stack }
+stackClearOverhead :: Stack -> (Int64, Stack)
+stackClearOverhead s =
+    let overhead = stackOverheadSize s
+        reservedValues = Map.keysSet (stackReservedSlots s)
+        s' = s {stackOverheadSize = 0,
+                stackOccupiedSlots = Map.restrictKeys (stackOccupiedSlots s) reservedValues}
+    in  (overhead, s')
 
-shrinkHole :: Hole -> Size -> Stack -> Stack
-shrinkHole h@(f, t) size stack =
-    let h' = (f, t - sizeInBytes size)
-    in  stackNormalise $ stack { stackContents = h':delete h (stackContents stack)}
+stackPush :: ValIdent -> Size -> Stack -> (Loc, Stack)
+stackPush vi size s =
+    let sizeBefore = stackOverheadSize s
+        bytes = sizeInBytes size
+        slot = Slot (-sizeBefore - stackReservedSize s - bytes) size
+        s' = s {stackOverheadSize = sizeBefore + bytes,
+                stackOccupiedSlots = Map.insert vi slot (stackOccupiedSlots s)}
+    in (slotToLoc slot, s')
 
-findHole :: Size -> Stack -> Maybe Hole
-findHole size stack =
-    let valid = filter (\h -> holeSize h > sizeInBytes size) (stackContents stack)
-    in  safeMinimumBy cmp valid
-    where safeMinimumBy _ [] = Nothing
-          safeMinimumBy f xs = Just $ minimumBy f xs
-          cmp h1 h2 = compare (holeSize h1) (holeSize h2)
+stackPushUnnamed :: Size -> Stack -> Stack
+stackPushUnnamed size s = s {stackOverheadSize = stackOverheadSize s + sizeInBytes size}
 
-holeSize :: Hole -> Int
-holeSize (f, t) = t - f + 1
+stackDelete :: ValIdent -> Stack -> Stack
+stackDelete vi s = s {stackOccupiedSlots = Map.delete vi (stackOccupiedSlots s)}
 
-stackNormalise :: Stack -> Stack
-stackNormalise stack = stack { stackContents = foldr normaliseHoles [] (sort $ stackContents stack)}
-    where
-        normaliseHoles x [] = [x]
-        normaliseHoles (f2, t2) ((f1, t1):hs) | t2 >= f1 = (f2, max t1 t2):hs
-        normaliseHoles h hs = h:hs
+stackIsValueReserved :: ValIdent -> Stack -> Bool
+stackIsValueReserved vi = Map.member vi . stackReservedSlots
+
+stackInsertReserved :: ValIdent -> Stack -> (Loc, Stack)
+stackInsertReserved vi s = case Map.lookup vi (stackReservedSlots s) of
+    Just slot -> (slotToLoc slot, s {stackOccupiedSlots = Map.insert vi slot (stackOccupiedSlots s)})
+    Nothing -> error $ "stackInsertReserved: value with not reserved slot " ++ toStr vi
+
+stackContains :: ValIdent -> Stack -> Bool
+stackContains vi s = Map.member vi (stackOccupiedSlots s)
+
+stackAlign16 :: Stack -> (Int64, Stack)
+stackAlign16 s = let misalignment = 16 - (stackReservedSize s + stackOverheadSize s) `mod` 16
+                     x = if misalignment == 16 then 0 else misalignment
+                 in (x, s {stackOverheadSize = stackOverheadSize s + x})
+
+slotToLoc :: Slot -> Loc
+slotToLoc slot = LocStack (slotOffset slot)

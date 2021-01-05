@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveFoldable   #-}
 {-# LANGUAGE DeriveFunctor    #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Espresso.ControlFlow.CFG (cfg, CFG(..), Node(..), linearize) where
+module Espresso.ControlFlow.CFG (cfg, CFG(..), Node(..), linearize, nodeHead, nodeTail) where
 
 import           Control.Monad.State
 import           Data.Bifunctor
@@ -9,6 +9,7 @@ import qualified Data.Map            as Map
 import qualified Data.Set            as Set
 import           Espresso.Syntax.Abs
 import           Identifiers
+import           Utilities
 
 newtype CFG a = CFG (Map.Map LabIdent (Node a)) deriving (Eq, Functor, Foldable)
 
@@ -37,6 +38,14 @@ linearize (CFG g) = evalState (go (g Map.! entryLabel)) Set.empty
             if wasVisited then return [] else do
                 modify (Set.insert l)
                 go node
+
+nodeHead :: Node a -> a
+nodeHead node = let firstInstr = head $ nodeCode node
+                in single firstInstr
+
+nodeTail :: Node a -> a
+nodeTail node = let lastInstr = last $ nodeCode node
+                in single lastInstr
 
 splitBasicBlocks :: [Instr a] -> [(LabIdent, [Instr a])]
 splitBasicBlocks = go []
