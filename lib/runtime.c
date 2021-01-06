@@ -45,22 +45,24 @@ typedef struct lat_string
     const char *contents;
 } lat_string;
 
-void lat_print_int(int x)
+void lat_print_int(int32_t x)
 {
     CHK_SYSERR(printf("%d\n", x), "printf")
 }
 
 void lat_print_string(const lat_string *str)
 {
-    CHK_SYSERR(printf("%s", str->contents), "printf")
+    CHK_SYSERR(printf("%s", str->contents), "printf");
     CHK_SYSERR(printf("\n"), "printf")
 }
 
-int lat_read_int()
+int32_t lat_read_int()
 {
-    int n;
-    CHK_SYSERR(scanf("%d", &n), "scanf")
-    return n;
+    char *line = NULL;
+    size_t len = 0;
+    CHK_SYSERR(getline(&line, &len, stdin), "getline");
+
+    return strtol(line, NULL, 10);
 }
 
 const lat_string *lat_new_string(const char *str, size_t len)
@@ -78,8 +80,16 @@ const lat_string *lat_new_string(const char *str, size_t len)
 const lat_string *lat_read_string()
 {
     char *line = NULL;
-    size_t len = 0;
-    CHK_SYSERR(getline(&line, &len, stdin), "getline");
+    size_t line_size;
+    ssize_t len = getline(&line, &line_size, stdin);
+
+    CHK_SYSERR(len, "getline");
+
+    if (line[len - 1] == '\n')
+    {
+        line[len - 1] = '\0';
+        len -= 1;
+    }
 
     return lat_new_string(line, len);
 }
@@ -103,11 +113,12 @@ const lat_string *lat_cat_strings(const lat_string *str1, const lat_string *str2
     lat_nullchk(str2);
 
     size_t new_length = str1->length + str2->length;
-    char *result = malloc(new_length * sizeof(char));
+    char *result = malloc((new_length + 1) * sizeof(char));
     CHK_SYSERR_VAL(result, NULL, "malloc")
 
     strcpy(result, str1->contents);
     strcat(result, str2->contents);
+    result[new_length] = '\0';
 
     return lat_new_string(result, new_length);
 }

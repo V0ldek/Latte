@@ -62,22 +62,26 @@ dont _ = return ()
 goodTest :: LatTest -> Spec
 goodTest latTest =
     if tstName latTest `elem` skip then runIO $ putStrLn $ "skipping " ++ tstName latTest
-    else do
+    else describe (tstName latTest) $ do
     let fs = StaticFS [StaticF (tstName latTest <.> latExt) (tstContents latTest)]
         out = runStaticIO (go latTest) [] fs
         esp = staticContents $ fromJust $
             find (\f -> staticPath f == espressoFile "." (tstName latTest)) (staticFiles $ staticFS out)
         espOpt = staticContents $ fromJust $
             find (\f -> staticPath f == espressoOptFile "." (tstName latTest)) (staticFiles $ staticFS out)
+        espPhi = staticContents $ fromJust $
+            find (\f -> staticPath f == espressoWithUnfoldedPhiFile "." (tstName latTest)) (staticFiles $ staticFS out)
         asm = staticContents $ fromJust $
             find (\f -> staticPath f == assemblyFile "." (tstName latTest)) (staticFiles $ staticFS out)
         espPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer esp
         espOptPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espOpt
+        espPhiPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espPhi
     it (tstName latTest ++ " returns 0") $ LatteIO.staticCode out `shouldBe` ExitSuccess
-    case (espPar, espOptPar) of
-        (Right espProg, Right espOptProg) -> do
+    case sequence [espPar, espOptPar, espPhiPar] of
+        Right [espProg, espOptProg, espPhiProg] -> do
             let espOut = runStaticIO (interpret $ unwrapPos espProg) (tstIn latTest) (StaticFS [])
                 espOptOut = runStaticIO (interpret $ unwrapPos espOptProg) (tstIn latTest) (StaticFS [])
+                espPhiOut = runStaticIO (interpret $ unwrapPos espPhiProg) (tstIn latTest) (StaticFS [])
             it (tstName latTest ++ " is OK") $ LatteIO.staticErr out `shouldBe` tstErr latTest
             it (tstName latTest ++ " Espresso returns 0") $
                 LatteIO.staticCode espOut `shouldBe` ExitSuccess
@@ -87,10 +91,14 @@ goodTest latTest =
                 LatteIO.staticCode espOptOut `shouldBe` ExitSuccess
             it (tstName latTest ++ " optimised Espresso output is correct") $
                 normaliseOut (LatteIO.staticOut espOptOut) `shouldBe` normaliseOut (tstOut latTest)
+            it (tstName latTest ++ " unfolded phis Espresso returns 0") $
+                LatteIO.staticCode espPhiOut `shouldBe` ExitSuccess
+            it (tstName latTest ++ " unfolded phis Espresso output is correct") $
+                normaliseOut (LatteIO.staticOut espPhiOut) `shouldBe` normaliseOut (tstOut latTest)
             it (tstName latTest ++ " x86_64 output is nonempty") $
                 null asm `shouldBe` False
-        (Left s, _) -> Prelude.error (tstName latTest ++ ": " ++ s)
-        (_, Left s) -> Prelude.error (tstName latTest ++ ": " ++ s)
+        Right _ -> Prelude.error "impossible"
+        Left s -> Prelude.error (tstName latTest ++ ": " ++ s)
 
 badTest :: LatTest -> Spec
 badTest latTest = do

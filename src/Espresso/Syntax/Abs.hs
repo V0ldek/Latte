@@ -95,6 +95,7 @@ data Instr a
     | IRet a (Val a)
     | IOp a ValIdent (Val a) (Op a) (Val a)
     | ISet a ValIdent (Val a)
+    | IStr a ValIdent String
     | IUnOp a ValIdent (UnOp a) (Val a)
     | IVCall a (Call a)
     | ICall a ValIdent (Call a)
@@ -115,6 +116,7 @@ instance Functor Instr where
         IRet a val -> IRet (f a) (fmap f val)
         IOp a valident val1 op val2 -> IOp (f a) valident (fmap f val1) (fmap f op) (fmap f val2)
         ISet a valident val -> ISet (f a) valident (fmap f val)
+        IStr a valident string -> IStr (f a) valident string
         IUnOp a valident unop val -> IUnOp (f a) valident (fmap f unop) (fmap f val)
         IVCall a call -> IVCall (f a) (fmap f call)
         ICall a valident call -> ICall (f a) valident (fmap f call)
@@ -143,7 +145,6 @@ instance Functor Call where
 data Val a
     = VInt a Integer
     | VNegInt a Integer
-    | VStr a String
     | VTrue a
     | VFalse a
     | VNull a
@@ -154,7 +155,6 @@ instance Functor Val where
     fmap f x = case x of
         VInt a integer        -> VInt (f a) integer
         VNegInt a integer     -> VNegInt (f a) integer
-        VStr a string         -> VStr (f a) string
         VTrue a               -> VTrue (f a)
         VFalse a              -> VFalse (f a)
         VNull a               -> VNull (f a)
@@ -171,8 +171,6 @@ data Op a
     | OpGE a
     | OpEQU a
     | OpNE a
-    | OpAnd a
-    | OpOr a
   deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Op where
@@ -188,8 +186,6 @@ instance Functor Op where
         OpGE a  -> OpGE (f a)
         OpEQU a -> OpEQU (f a)
         OpNE a  -> OpNE (f a)
-        OpAnd a -> OpAnd (f a)
-        OpOr a  -> OpOr (f a)
 data UnOp a = UnOpNeg a | UnOpNot a
   deriving (Eq, Ord, Show, Read, Foldable)
 

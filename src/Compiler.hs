@@ -24,7 +24,7 @@ import           Syntax.Printer                as PrintLatte (Print, printTree)
 import           Syntax.Rewriter               (rewrite)
 import           System.FilePath               (dropExtension, takeDirectory,
                                                 takeFileName, (<.>), (</>))
-import           Utilities                     (single, unlessM)
+import           Utilities                     (unlessM)
 import           X86_64.Generator
 
 data Verbosity = Quiet | Verbose deriving (Eq, Ord, Show)
@@ -64,19 +64,19 @@ run opt = do
         espressoOpt = PrintEsp.printTree $ Esp.Program a meta (cfgsToMthds () cfgs)
     genStep opt (espressoCfgFile directory fileName) (showCfgs cfgs)
     genStep opt (espressoOptFile directory fileName) espressoOpt
+    printStringV v "Unfolding phis..."
+    let cfgsWithUnfoldedPhi = zip (map unfoldPhi cfgs) mthds
+        espressoWithUnfoldedPhi = PrintEsp.printTree $ Esp.Program () meta (cfgsToMthds () cfgsWithUnfoldedPhi)
+    genStep opt (espressoCfgWithUnfoldedPhiFile directory fileName) (showCfgs cfgsWithUnfoldedPhi)
+    genStep opt (espressoWithUnfoldedPhiFile directory fileName) espressoWithUnfoldedPhi
     printStringV v "Analysing liveness..."
-    let cfgsWithLiveness = map (first analyseLiveness) cfgs
+    let cfgsWithLiveness = map (first analyseLiveness) cfgsWithUnfoldedPhi
         espressoWithLiveness = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgsWithLiveness)
     genStep opt (espressoCfgWithLivenessFile directory fileName) (showCfgsWithLiveness cfgsWithLiveness)
-    genStep opt (espressoOptWithLivenessFile directory fileName) espressoWithLiveness
-    printStringV v "Unfolding phis..."
-    let cfgsWithUnfoldedPhi = map (first unfoldPhi) cfgsWithLiveness
-        espressoWithUnfoldedPhi = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgsWithUnfoldedPhi)
-    genStep opt (espressoCfgWithUnfoldedPhiFile directory fileName) (showCfgsWithLiveness cfgsWithUnfoldedPhi)
-    genStep opt (espressoOptWithUnfoldedPhiFile directory fileName) espressoWithUnfoldedPhi
+    genStep opt (espressoWithLivenessFile directory fileName) espressoWithLiveness
     printStringV v "Generating x86_64 assembly..."
-    let assembledMthds = map (\(g, mthd) -> generate mthd g) cfgsWithUnfoldedPhi
-    genOutput opt (assemblyFile directory fileName) (combineAssembly assembledMthds)
+    let assembly = generate cfgsWithLiveness
+    genOutput opt (assemblyFile directory fileName) assembly
 
 analysePhase :: (Monad m, LatteIO m) => Options -> String -> m (Metadata SemData)
 analysePhase opt latSrc = do
@@ -179,16 +179,16 @@ espressoCfgFile :: FilePath -> FilePath -> FilePath
 espressoCfgFile dir file = dir </> file <.> "cfg"
 
 espressoOptFile :: FilePath -> FilePath -> FilePath
-espressoOptFile dir file = dir </> file <.> "opt" <.> "esp"
-
-espressoCfgWithLivenessFile :: FilePath -> FilePath -> FilePath
-espressoCfgWithLivenessFile dir file = dir </> file <.> "liv" <.> "cfg"
-
-espressoOptWithLivenessFile :: FilePath -> FilePath -> FilePath
-espressoOptWithLivenessFile dir file = dir </> file <.> "liv" <.> "opt" <.> "esp"
+espressoOptFile dir file = dir </> file <.> "1" <.> "opt" <.> "esp"
 
 espressoCfgWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
-espressoCfgWithUnfoldedPhiFile dir file = dir </> file <.> "liv" <.> "phi" <.> "cfg"
+espressoCfgWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "cfg"
 
-espressoOptWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
-espressoOptWithUnfoldedPhiFile dir file = dir </> file <.> "liv" <.> "opt" <.> "phi" <.> "esp"
+espressoWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
+espressoWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "esp"
+
+espressoCfgWithLivenessFile :: FilePath -> FilePath -> FilePath
+espressoCfgWithLivenessFile dir file = dir </> file <.> "3" <.> "liv" <.> "cfg"
+
+espressoWithLivenessFile :: FilePath -> FilePath -> FilePath
+espressoWithLivenessFile dir file = dir </> file <.> "3" <.> "liv" <.> "esp"

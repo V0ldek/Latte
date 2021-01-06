@@ -16,6 +16,7 @@
 
 .method int ~cl_TopLevel.main(): [
   .L_entry:
-  call void ~cl_TopLevel.printString ("Hello, World!");
+  %v_0 := "Hello, World!";
+  call void ~cl_TopLevel.printString (string& %v_0);
   return 0;
 ]

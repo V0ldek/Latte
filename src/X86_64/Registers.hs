@@ -4,19 +4,19 @@ import qualified Data.Map            as Map
 import           Espresso.Syntax.Abs
 
 data RegType = CallerSaved | CalleeSaved deriving Eq
-data Reg = Reg {regHigh :: String, regLow :: String, regType :: RegType}
-data RegState = RegS {reg :: Reg, regReserved :: Bool, regVals :: [ValIdent]}
+data Reg = Reg {reg64 :: String, reg32 :: String, reg16 :: String, reg8 :: String, regType :: RegType}
+data RegState = RegS {reg :: Reg, regReserved :: Bool, regVals :: [ValIdent]} deriving Show
 
 data RegRank = Free RegType | Clean Int | Dirty Int deriving Eq
 
 instance Show Reg where
-    show = regHigh
+    show = reg64
 
 instance Eq Reg where
-    r1 == r2 = regHigh r1 == regHigh r2
+    r1 == r2 = reg64 r1 == reg64 r2
 
 instance Ord Reg where
-    compare r1 r2 = compare (regHigh r1) (regHigh r2)
+    compare r1 r2 = compare (reg64 r1) (reg64 r2)
 
 instance Ord RegType where
     compare rt1 rt2 = case (rt1, rt2) of
@@ -64,52 +64,52 @@ initialRegs = Map.fromList [
     ]
 
 rax :: Reg
-rax = Reg "rax" "eax" CallerSaved
+rax = Reg "rax" "eax" "ax" "al" CallerSaved
 
 rdx :: Reg
-rdx = Reg "rdx" "edx" CallerSaved
+rdx = Reg "rdx" "edx" "dx" "dl" CallerSaved
 
 rbx :: Reg
-rbx = Reg "rbx" "ebx" CalleeSaved
+rbx = Reg "rbx" "ebx" "bx" "bl" CalleeSaved
 
 rcx :: Reg
-rcx = Reg "rcx" "ecx" CallerSaved
+rcx = Reg "rcx" "ecx" "cx" "cl" CallerSaved
 
 rsi :: Reg
-rsi = Reg "rsi" "esi" CallerSaved
+rsi = Reg "rsi" "esi" "si" "sil" CallerSaved
 
 rdi :: Reg
-rdi = Reg "rdi" "edi" CallerSaved
+rdi = Reg "rdi" "edi" "di" "dil" CallerSaved
 
 rsp :: Reg
-rsp = Reg "rsp" "esp" CallerSaved
+rsp = Reg "rsp" "esp" "sp" "spl" CallerSaved
 
 rbp :: Reg
-rbp = Reg "rbp" "ebp" CalleeSaved
+rbp = Reg "rbp" "ebp" "bp" "bpl" CalleeSaved
 
 r8 :: Reg
-r8 = Reg "r8" "r8d" CallerSaved
+r8 = Reg "r8" "r8d" "r8w" "r8b" CallerSaved
 
 r9 :: Reg
-r9 = Reg "r9" "r9d" CallerSaved
+r9 = Reg "r9" "r9d" "r9w" "r9b" CallerSaved
 
 r10 :: Reg
-r10 = Reg "r10" "r10d" CallerSaved
+r10 = Reg "r10" "r10d" "r10w" "r10b" CallerSaved
 
 r11 :: Reg
-r11 = Reg "r11" "r11d" CallerSaved
+r11 = Reg "r11" "r11d" "r11w" "r11b" CallerSaved
 
 r12 :: Reg
-r12 = Reg "r12" "r12d" CalleeSaved
+r12 = Reg "r12" "r12d" "r12w" "r12b" CalleeSaved
 
 r13 :: Reg
-r13 = Reg "r13" "r13d" CalleeSaved
+r13 = Reg "r13" "r13d" "r13w" "r13b" CalleeSaved
 
 r14 :: Reg
-r14 = Reg "r14" "r14d" CalleeSaved
+r14 = Reg "r14" "r14d" "r14w" "r14b" CalleeSaved
 
 r15 :: Reg
-r15 = Reg "r15" "r15d" CalleeSaved
+r15 = Reg "r15" "r15d" "r15w" "r15b" CalleeSaved
 
 argReg :: Integer -> Maybe Reg
 argReg idx = case idx of

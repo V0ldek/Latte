@@ -23,7 +23,6 @@ movToStack :: EmitM m => Size -> Loc -> Int64 -> String -> m ()
 movToStack size src stackDest comment = case src of
     LocReg reg_ -> emitInd $ bin "mov" size (sizedReg size reg_) (stack stackDest) comment
     LocImm int  -> emitInd $ bin "mov" size (lit int) (stack stackDest) comment
-    LocConst _  -> error "no idea how to do this yet"
     LocStack _  -> error "internal error. mov from stack to stack"
 
 movToReg :: EmitM m => Size -> Loc -> Reg -> String -> m ()
@@ -43,8 +42,66 @@ add src dest =
         (LocStack _, LocStack _) -> error "internal error. add from stack to stack"
         _ -> emitInd $ bin "add" Double srcString destString ""
 
+sub :: EmitM m => Loc -> Loc -> m ()
+sub src dest =
+    let srcString = emitLoc Double src
+        destString = emitLoc Double dest
+    in case (src, dest) of
+        (_, LocImm _) -> error "internal error. sub to immediate"
+        (LocStack _, LocStack _) -> error "internal error. sub from stack to stack"
+        _ -> emitInd $ bin "sub" Double srcString destString ""
+
+imul :: EmitM m => Loc -> Loc -> m ()
+imul src dest =
+    let srcString = emitLoc Double src
+        destString = emitLoc Double dest
+    in case (src, dest) of
+        (_, LocImm _) -> error "internal error. mul to immediate"
+        (LocStack _, LocStack _) -> error "internal error. mul from stack to stack"
+        _ -> emitInd $ bin "imul" Double srcString destString ""
+
+cmp :: EmitM m => Size -> Loc -> Loc -> m ()
+cmp size rhs lhs =
+    let rhsString = emitLoc size rhs
+        lhsString = emitLoc size lhs
+    in case (rhs, lhs) of
+        (LocImm _, LocImm _) -> error "internal error. cmp on immediates"
+        (LocStack _, LocStack _) -> error "internal error. cmp on two stack locs"
+        _ -> emitInd $ bin "cmp" size rhsString lhsString ""
+
+xor :: EmitM m => Size -> Loc -> Loc -> m ()
+xor size src dest =
+    let srcString = emitLoc size src
+        destString = emitLoc size dest
+    in case (src, dest) of
+        (LocImm _, LocImm _) -> error "internal error. xor on immediates"
+        (LocStack _, LocStack _) -> error "internal error. xor on two stack locs"
+        _ -> emitInd $ bin "xor" size srcString destString ""
+
+leaOfConst :: EmitM m => String -> Reg -> m ()
+leaOfConst constIdent dest =
+    emitInd $ "lea " ++ constIdent ++ "(%rip), " ++ reg (reg64 dest)
+
 neg :: EmitM m => Reg -> m ()
 neg reg_ = emitInd $ "neg" ++ sizeSuf Double ++ " " ++ sizedReg Double reg_
+
+setl :: EmitM m => Reg -> m ()
+setl reg_ = emitInd $ "setl " ++ sizedReg Byte reg_
+
+setle :: EmitM m => Reg -> m ()
+setle reg_ = emitInd $ "setle " ++ sizedReg Byte reg_
+
+setg :: EmitM m => Reg -> m ()
+setg reg_ = emitInd $ "setg " ++ sizedReg Byte reg_
+
+setge :: EmitM m => Reg -> m ()
+setge reg_ = emitInd $ "setge " ++ sizedReg Byte reg_
+
+sete :: EmitM m => Reg -> m ()
+sete reg_ = emitInd $ "sete " ++ sizedReg Byte reg_
+
+setne :: EmitM m => Reg -> m ()
+setne reg_ = emitInd $ "setne " ++ sizedReg Byte reg_
 
 test :: EmitM m => Loc -> Loc -> m ()
 test op1 op2 =
@@ -54,6 +111,12 @@ test op1 op2 =
 
 jz :: EmitM m => LabIdent -> m ()
 jz (LabIdent l) = emitInd $ "jz " ++ sanitise l
+
+idiv :: EmitM m => Size -> Loc -> m ()
+idiv size loc = emitInd $ "idiv" ++ sizeSuf size ++ " " ++ emitLoc size loc
+
+cdq :: EmitM m => m ()
+cdq = emitInd "cdq"
 
 call :: EmitM m => String -> m ()
 call f = emitInd $ "call " ++ sanitise f
@@ -67,7 +130,7 @@ incrStack n comment = emitInd $ "subq " ++ lit64 n ++ ", %rsp" ++ emitComment co
 decrStack :: EmitM m => Int64 -> m ()
 decrStack n = emitInd $ "addq " ++ lit64 n ++ ", %rsp"
 
-lit :: Int32 -> String
+lit :: Int -> String
 lit n = '$':show n
 
 lit64 :: Int64 -> String
@@ -75,9 +138,9 @@ lit64 n = '$':show n
 
 sizedReg :: Size -> Reg -> String
 sizedReg size r = case size of
-    Byte      -> reg $ regLow r
-    Double    -> reg $ regLow r
-    Quadruple -> reg $ regHigh r
+    Byte      -> reg $ reg8 r
+    Double    -> reg $ reg32 r
+    Quadruple -> reg $ reg64 r
 
 reg :: String -> String
 reg r = '%':r
@@ -90,7 +153,7 @@ bin instr size x y comment = instr ++ sizeSuf size ++ " " ++ x ++ ", " ++ y ++ e
 
 sizeSuf :: Size -> String
 sizeSuf s = case s of
-    Byte      -> "l"
+    Byte      -> "b"
     Double    -> "l"
     Quadruple -> "q"
 
@@ -102,9 +165,6 @@ sanitise s = case s of
 
 emitLoc :: Size -> Loc -> String
 emitLoc size loc = case loc of
-    LocReg r | size == Byte || size == Double -> reg $ regLow r
-    LocReg r | size == Quadruple  -> reg $ regHigh r
-    LocReg _ -> error "impossible"
+    LocReg r   -> sizedReg size r
     LocStack n -> stack n
-    LocImm n -> lit n
-    LocConst _ -> error "no idea how to do this yet"
+    LocImm n   -> lit n

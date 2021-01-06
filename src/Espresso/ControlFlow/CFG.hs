@@ -27,17 +27,22 @@ cfg (Mthd _ _ _ _ instrs) =
     in  execState (construct basicBlocks) (CFG initial)
 
 linearize :: CFG a -> [Instr a]
-linearize (CFG g) = evalState (go (g Map.! entryLabel)) Set.empty
+linearize (CFG g) =
+    case Map.lookup entryLabel g of
+        Just entry -> evalState (go entry) Set.empty
+        Nothing    -> error "internal error. malformed graph, no entry label"
     where
         go node = do
             rest <- mapM expand (Set.elems $ nodeOut node)
             return $ nodeCode node ++ concat rest
         expand l = do
-            let node = g Map.! l
-            wasVisited <- gets (Set.member l)
-            if wasVisited then return [] else do
-                modify (Set.insert l)
-                go node
+            case Map.lookup l g of
+                Just node -> do
+                    wasVisited <- gets (Set.member l)
+                    if wasVisited then return [] else do
+                        modify (Set.insert l)
+                        go node
+                Nothing -> error $ "internal error. malformed graph, no " ++ toStr l ++ " node"
 
 nodeHead :: Node a -> a
 nodeHead node = let firstInstr = head $ nodeCode node
@@ -75,10 +80,14 @@ construct = mapM_ fromJumps
 
 addEdge :: LabIdent -> LabIdent -> State (CFG a) ()
 addEdge from to = do
-    fromNode <- gets (\(CFG g) -> g Map.! from)
-    toNode <- gets (\(CFG g) -> g Map.! to)
-    let fromNode' = fromNode {nodeOut = Set.insert to (nodeOut fromNode)}
-        toNode' = toNode {nodeIn = Set.insert from (nodeOut toNode)}
+    mbfromNode <- gets (\(CFG g) -> Map.lookup from g)
+    mbtoNode <- gets (\(CFG g) -> Map.lookup to g)
+    let fromNode' = case mbfromNode of
+            Just fromNode -> fromNode {nodeOut = Set.insert to (nodeOut fromNode)}
+            Nothing -> error $ "internal error. no src label " ++ toStr from
+        toNode' = case mbtoNode of
+            Just toNode -> toNode {nodeIn = Set.insert from (nodeOut toNode)}
+            Nothing     -> error $ "internal error. no dest label " ++ toStr to
     modify (\(CFG g) -> CFG $ Map.insert from fromNode' g)
     modify (\(CFG g) -> CFG $ Map.insert to toNode' g)
 

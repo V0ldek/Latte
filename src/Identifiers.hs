@@ -61,5 +61,11 @@ valIdent = ValIdent . ("%v_" ++)
 labIdent :: String -> LabIdent
 labIdent = LabIdent . (".L_" ++)
 
+phiUnfoldJumpFromToLabel :: LabIdent -> LabIdent -> LabIdent
+phiUnfoldJumpFromToLabel (LabIdent from) (LabIdent to) = LabIdent $ to ++ "__from_" ++ trim from
+    where
+        trim ('.':'L':'_':xs) = xs
+        trim xs               = xs
+
 reservedNames :: [Ident]
 reservedNames = [selfSymIdent]

@@ -177,6 +177,7 @@ instance Print (Instr a) where
     IRet _ val -> prPrec i 0 (concatD [doc (showString "return"), prt 0 val, doc (showString ";")])
     IOp _ valident val1 op val2 -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 val1, prt 0 op, prt 0 val2, doc (showString ";")])
     ISet _ valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 val, doc (showString ";")])
+    IStr _ valident str -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 str, doc (showString ";")])
     IUnOp _ valident unop val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 unop, prt 0 val, doc (showString ";")])
     IVCall _ call -> prPrec i 0 (concatD [prt 0 call, doc (showString ";")])
     ICall _ valident call -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 call, doc (showString ";")])
@@ -204,7 +205,6 @@ instance Print (Val a) where
   prt i e = case e of
     VInt _ n -> prPrec i 0 (concatD [prt 0 n])
     VNegInt _ n -> prPrec i 0 (concatD [doc (showString "-"), prt 0 n])
-    VStr _ str -> prPrec i 0 (concatD [prt 0 str])
     VTrue _ -> prPrec i 0 (concatD [doc (showString "true")])
     VFalse _ -> prPrec i 0 (concatD [doc (showString "false")])
     VNull _ -> prPrec i 0 (concatD [doc (showString "null")])
@@ -225,8 +225,6 @@ instance Print (Op a) where
     OpGE _ -> prPrec i 0 (concatD [doc (showString ">=")])
     OpEQU _ -> prPrec i 0 (concatD [doc (showString "==")])
     OpNE _ -> prPrec i 0 (concatD [doc (showString "!=")])
-    OpAnd _ -> prPrec i 0 (concatD [doc (showString "&")])
-    OpOr _ -> prPrec i 0 (concatD [doc (showString "|")])
 
 instance Print (UnOp a) where
   prt i e = case e of
@@ -301,6 +299,7 @@ instance Show a => PrintWithComments (Instr a) where
     IRet a val -> prPrec i 0 (concatD [doc (showString "return"), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IOp a valident val1 op val2 -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 val1, prt 0 op, prt 0 val2, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     ISet a valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IStr a valident str -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 str, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IUnOp a valident unop val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 unop, prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IVCall a call -> prPrec i 0 (concatD [prt 0 call, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     ICall a valident call -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 call, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])

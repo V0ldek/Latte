@@ -211,7 +211,10 @@ genExpr expr = case expr of
         val <- askSym i
         return (toVVal val)
     Latte.ELitInt _ n     -> return $ VInt () n
-    Latte.EString _ s     -> return $ VStr () s
+    Latte.EString _ s     -> do
+        newval <- freshVal
+        emit $ IStr () newval s
+        return $ VVal () (Ref () (Str ())) newval
     Latte.ELitTrue _      -> return $ VTrue ()
     Latte.ELitFalse _     -> return $ VFalse ()
     Latte.ENullI _ _      -> error "should be converted to ENull"
@@ -352,8 +355,8 @@ genFun e = case e of
 defaultVal :: SType a -> Val ()
 defaultVal t = case deref t of
     Int _   -> VInt () 0
-    Str _   -> VStr () []
     Bool _  -> VFalse ()
+    Str _   -> VNull ()
     Cl _ _  -> VNull ()
     Arr _ _ -> VNull ()
     _       -> error $ "invalid type " ++ show (() <$ t)

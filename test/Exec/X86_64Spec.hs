@@ -9,6 +9,9 @@ import           System.Process
 import           Test.Hspec
 import           Utilities
 
+cleanupEnabled :: Bool
+cleanupEnabled = True
+
 main :: IO ()
 main = do
     testPaths <- getTestFilesWithoutExtensions
@@ -27,9 +30,9 @@ runTest test = do
         outputFile = workDirectory </> test <.> expectedOutputExtension
         actualOutputFile = workDirectory </> test <.> actualOutputExtension
         execFile = workDirectory </> test
-    latcExitCode <- runIO $ runPrtCommand (compilerPath ++ " " ++ latFile) >>= waitForProcess
+    latcExitCode <- runIO $ runPrtCommand (compilerPath ++ " -g " ++ latFile) >>= waitForProcess
     execExists <- runIO $ doesFileExist execFile
-    execExitCode <- runIO $ runPrtCommand (execFile ++ " << " ++ inputFile ++ " >> " ++ actualOutputFile)
+    execExitCode <- runIO $ runPrtCommand (execFile ++ " < " ++ inputFile ++ " > " ++ actualOutputFile)
         >>= waitForProcess
     expectedOutputExists <- runIO $ doesFileExist outputFile
     actualOutputExists <- runIO $ doesFileExist actualOutputFile
@@ -70,9 +73,9 @@ runPrtCommand :: String -> IO ProcessHandle
 runPrtCommand s = putStrLn ("running: " ++ s) >> runCommand s
 
 cleanup :: IO ()
-cleanup = do
+cleanup = when cleanupEnabled (do
     rmExitCode <- runPrtCommand ("rm -rf " ++ workDirectory) >>= waitForProcess
-    unless (rmExitCode == ExitSuccess) (failCmd "rm" rmExitCode)
+    unless (rmExitCode == ExitSuccess) (failCmd "rm" rmExitCode))
 
 normaliseOut :: String -> String
 normaliseOut s = dropWhile isSpace $ reverse $ dropWhile isSpace $ reverse s

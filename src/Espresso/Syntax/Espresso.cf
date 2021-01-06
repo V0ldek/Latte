@@ -49,6 +49,7 @@ IVRet.     Instr ::= "return" ";" ;
 IRet.      Instr ::= "return" Val ";" ;
 IOp.       Instr ::= ValIdent ":=" Val Op Val ";" ;
 ISet.      Instr ::= ValIdent ":=" Val ";" ;
+IStr.      Instr ::= ValIdent ":=" String ";" ;
 IUnOp.     Instr ::= ValIdent ":=" UnOp Val ";" ;
 IVCall.    Instr ::= Call ";" ;
 ICall.     Instr ::= ValIdent ":=" Call ";" ;
@@ -69,13 +70,12 @@ separator Instr "" ;
 separator Val "," ;
 separator PhiVariant "," ;
 
-VInt.   Val ::= Integer ;
+VInt.    Val ::= Integer ;
 VNegInt. Val ::= "-" Integer ;
-VStr.   Val ::= String ;
-VTrue.  Val ::= "true" ;
-VFalse. Val ::= "false" ;
-VNull.  Val ::= "null" ;
-VVal.   Val ::= SType ValIdent ;
+VTrue.   Val ::= "true" ;
+VFalse.  Val ::= "false" ;
+VNull.   Val ::= "null" ;
+VVal.    Val ::= SType ValIdent ;
 
 OpAdd. Op ::= "+" ;
 OpSub. Op ::= "-" ;
@@ -88,8 +88,6 @@ OpGTH. Op ::= ">" ;
 OpGE.  Op ::= ">=" ;
 OpEQU. Op ::= "==" ;
 OpNE.  Op ::= "!=" ;
-OpAnd. Op ::= "&" ;
-OpOr.  Op ::= "|" ;
 
 UnOpNeg. UnOp ::= "-" ;
 UnOpNot. UnOp ::= "!" ;

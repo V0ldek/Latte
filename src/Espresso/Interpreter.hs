@@ -108,6 +108,9 @@ execute prevLabel currLabel (instr : is) ret = case instr of
         x <- getVal v
         newval <- store (toStr i) x
         localObj newval $ execute prevLabel currLabel is ret
+    IStr _ i str -> do
+        newval <- store (toStr i) (PStr str)
+        localObj newval $ execute prevLabel currLabel is ret
     IUnOp _ i op v -> do
         x <- getVal v
         let res = performUnOp x op
@@ -203,7 +206,6 @@ getVal :: (LatteIO m, Monad m) => Val a -> InterpreterM m Object
 getVal val = case val of
     VInt _ n    -> return $ PInt (fromInteger n)
     VNegInt _ n -> return $ PInt (fromInteger (-n))
-    VStr _ s    -> return $ PStr s
     VTrue _     -> return $ PBool True
     VFalse _    -> return $ PBool False
     VNull _     -> return PNull
@@ -250,21 +252,19 @@ isTrue x = case x of
 
 performOp :: Object -> Object -> Op Pos -> Object
 performOp x1 x2 op = case (x1, x2, op) of
-    (PInt n1, PInt n2, OpAdd {})   -> PInt $ n1 + n2
-    (PStr s1, PStr s2, OpAdd {})   -> PStr $ s1 ++ s2
-    (PInt n1, PInt n2, OpSub {})   -> PInt $ n1 - n2
-    (PInt n1, PInt n2, OpMul {})   -> PInt $ n1 * n2
-    (PInt n1, PInt n2, OpDiv {})   -> PInt $ n1 `div` n2
-    (PInt n1, PInt n2, OpMod {})   -> PInt $ n1 `mod` n2
-    (PBool b1, PBool b2, OpAnd {}) -> PBool $ b1 && b2
-    (PBool b1, PBool b2, OpOr {})  -> PBool $ b1 || b2
-    (_, _, OpEQU {})               -> PBool $ areEq x1 x2
-    (_, _, OpNE {})                -> PBool $ not $ areEq x1 x2
-    (_, _, OpGE {})                -> PBool $ getOrd x1 x2 op
-    (_, _, OpGTH {})               -> PBool $ getOrd x1 x2 op
-    (_, _, OpLE {})                -> PBool $ getOrd x1 x2 op
-    (_, _, OpLTH {})               -> PBool $ getOrd x1 x2 op
-    _                              -> Prelude.error (show op)
+    (PInt n1, PInt n2, OpAdd {}) -> PInt $ n1 + n2
+    (PStr s1, PStr s2, OpAdd {}) -> PStr $ s1 ++ s2
+    (PInt n1, PInt n2, OpSub {}) -> PInt $ n1 - n2
+    (PInt n1, PInt n2, OpMul {}) -> PInt $ n1 * n2
+    (PInt n1, PInt n2, OpDiv {}) -> PInt $ n1 `div` n2
+    (PInt n1, PInt n2, OpMod {}) -> PInt $ n1 `mod` n2
+    (_, _, OpEQU {})             -> PBool $ areEq x1 x2
+    (_, _, OpNE {})              -> PBool $ not $ areEq x1 x2
+    (_, _, OpGE {})              -> PBool $ getOrd x1 x2 op
+    (_, _, OpGTH {})             -> PBool $ getOrd x1 x2 op
+    (_, _, OpLE {})              -> PBool $ getOrd x1 x2 op
+    (_, _, OpLTH {})             -> PBool $ getOrd x1 x2 op
+    _                            -> Prelude.error (show op)
 
 performUnOp :: Object -> UnOp Pos -> Object
 performUnOp x op = case (x, op) of
