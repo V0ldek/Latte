@@ -1,14 +1,14 @@
 module Compiler where
 
 import           Control.Monad                 (when)
-import           Data.Bifunctor
+import           Data.Bifunctor                (Bifunctor (first))
 import qualified Data.Map                      as Map
 import           ErrM                          (toEither)
 import           Espresso.CodeGen.Generator    (generateEspresso)
 import           Espresso.ControlFlow.CFG
 import           Espresso.ControlFlow.Liveness (Liveness, analyseLiveness,
                                                 emptyLiveness)
-import           Espresso.ControlFlow.Phi
+import           Espresso.ControlFlow.Phi      (unfoldPhi)
 import qualified Espresso.Syntax.Abs           as Esp
 import           Espresso.Syntax.Printer       as PrintEsp (Print, printTree,
                                                             printTreeWithInstrComments)
@@ -25,7 +25,8 @@ import           Syntax.Rewriter               (rewrite)
 import           System.FilePath               (dropExtension, takeDirectory,
                                                 takeFileName, (<.>), (</>))
 import           Utilities                     (unlessM)
-import           X86_64.Generator
+import           X86_64.CodeGen.Generator      (generate)
+import qualified X86_64.Optimisation.Peephole  as Peephole
 
 data Verbosity = Quiet | Verbose deriving (Eq, Ord, Show)
 
@@ -76,7 +77,9 @@ run opt = do
     genStep opt (espressoWithLivenessFile directory fileName) espressoWithLiveness
     printStringV v "Generating x86_64 assembly..."
     let assembly = generate cfgsWithLiveness
-    genOutput opt (assemblyFile directory fileName) assembly
+    genOutput opt (unoptAssemblyFile directory fileName) assembly
+    let optAssembly = unlines $ Peephole.optimise (lines assembly)
+    genOutput opt (assemblyFile directory fileName) optAssembly
 
 analysePhase :: (Monad m, LatteIO m) => Options -> String -> m (Metadata SemData)
 analysePhase opt latSrc = do
@@ -171,6 +174,9 @@ showEspWithLiveness meta mthds = PrintEsp.printTreeWithInstrComments (Esp.Progra
 
 assemblyFile :: FilePath -> FilePath -> FilePath
 assemblyFile dir file = dir </> file <.> "s"
+
+unoptAssemblyFile :: FilePath -> FilePath -> FilePath
+unoptAssemblyFile dir file = dir </> file <.> "noopt" <.> "s"
 
 espressoFile :: FilePath -> FilePath -> FilePath
 espressoFile dir file = dir </> file <.> "esp"

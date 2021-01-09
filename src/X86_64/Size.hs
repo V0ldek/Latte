@@ -1,3 +1,4 @@
+-- Sizes of different types of values from Espresso.
 module X86_64.Size where
 
 import           Data.Int
@@ -17,3 +18,12 @@ typeSize t = case t of
     Bool _  -> Byte
     Ref _ _ -> Quadruple
     _       -> error "typeSize: invalid type"
+
+valSize :: Val a -> Size
+valSize val = case val of
+    VInt _  _    -> Double
+    VNegInt _  _ -> Double
+    VTrue _      -> Byte
+    VFalse _     -> Byte
+    VNull _      -> Quadruple
+    VVal _ t _   -> typeSize t

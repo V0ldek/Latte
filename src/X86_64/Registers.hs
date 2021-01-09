@@ -4,10 +4,40 @@ import qualified Data.Map            as Map
 import           Espresso.Syntax.Abs
 
 data RegType = CallerSaved | CalleeSaved deriving Eq
-data Reg = Reg {reg64 :: String, reg32 :: String, reg16 :: String, reg8 :: String, regType :: RegType}
-data RegState = RegS {reg :: Reg, regReserved :: Bool, regVals :: [ValIdent]} deriving Show
+data Reg = Reg {
+    -- Identifier for the 64 bits of the register.
+    reg64   :: String,
+    -- Identifier for the lower 32 bits of the register.
+    reg32   :: String,
+    -- Identifier for the lower 16 bits of the register.
+    reg16   :: String,
+    -- Identifier for the lower 8 bits of the register.
+    reg8    :: String,
+    -- Whether the register is caller or callee saved.
+    regType :: RegType
+}
 
-data RegRank = Free RegType | Clean Int | Dirty Int deriving Eq
+data RegState = RegS {
+    reg         :: Reg,
+    -- Whether the register is reserved for some operation and cannot be modified.
+    regReserved :: Bool,
+    -- Values currently residing in the register.
+    regVals     :: [ValIdent]
+} deriving Show
+
+-- Register rank for the purposes of spilling.
+data RegRank =
+    -- Currently free
+    Free RegType |
+    -- The contained values are all saved in memory.
+    -- The integer value is the distance to the next use
+    -- of a value inside.
+    Clean Int |
+    -- The contained values are not saved in memory.
+    -- The integer value is the distance to the next use
+    -- of a value inside.
+    Dirty Int
+    deriving Eq
 
 instance Show Reg where
     show = reg64
@@ -18,13 +48,20 @@ instance Eq Reg where
 instance Ord Reg where
     compare r1 r2 = compare (reg64 r1) (reg64 r2)
 
+-- Caller saved registers are preferred over callee saved.
 instance Ord RegType where
     compare rt1 rt2 = case (rt1, rt2) of
         (CallerSaved, CallerSaved) -> EQ
         (CalleeSaved, CalleeSaved) -> EQ
-        (CallerSaved, CalleeSaved) -> LT
-        (CalleeSaved, CallerSaved) -> GT
+        (CalleeSaved, CallerSaved) -> LT
+        (CallerSaved, CalleeSaved) -> GT
 
+-- When choosing a register to put a value in prefer free
+-- registers.
+-- Otherwise, when choosing a register to spill:
+-- - Choose a register holding a value whose use lies farthest in the future;
+-- - prefer clean values to dirty values;
+-- - if no clean value, chooese a dirty one.
 instance Ord RegRank where
     compare r1 r2 = case (r1, r2) of
         (Free rt1, Free rt2)   -> compare rt1 rt2
@@ -37,12 +74,15 @@ instance Ord RegRank where
         (Clean c, Dirty d)     -> if d < c then GT else LT
         (Dirty d, Clean c)     -> if d < c then LT else GT
 
+-- Default state at start of execution for general purpose registers.
 emptyState :: Reg -> RegState
 emptyState r = RegS r False []
 
+-- Default state at start of execution for special registers (rsp, rbp).
 reservedState :: Reg -> RegState
 reservedState r = RegS r True []
 
+-- All registers and their states for x86_64.
 initialRegs :: Map.Map Reg RegState
 initialRegs = Map.fromList [
         (rax, emptyState rax),
@@ -110,13 +150,3 @@ r14 = Reg "r14" "r14d" "r14w" "r14b" CalleeSaved
 
 r15 :: Reg
 r15 = Reg "r15" "r15d" "r15w" "r15b" CalleeSaved
-
-argReg :: Integer -> Maybe Reg
-argReg idx = case idx of
-    0 -> Just rdi
-    1 -> Just rsi
-    2 -> Just rdx
-    3 -> Just rcx
-    4 -> Just r8
-    5 -> Just r9
-    _ -> Nothing

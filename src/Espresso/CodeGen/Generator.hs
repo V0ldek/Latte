@@ -1,80 +1,25 @@
 module Espresso.CodeGen.Generator (generateEspresso) where
 
-import           Control.Monad.Identity
 import           Control.Monad.Reader
-import           Control.Monad.State
-import qualified Data.Map                  as Map
-import           Data.Maybe                (fromJust)
-import           Espresso.Syntax.Abs       as Espresso
+import           Data.List                  (foldl')
+import qualified Data.Map                   as Map
+import           Data.Maybe                 (fromJust)
+import           Espresso.CodeGen.GenM
+import           Espresso.CodeGen.Labels
+import           Espresso.CodeGen.Operators
+import           Espresso.Syntax.Abs        as Espresso
+import           Espresso.Types
+import           Espresso.Utilities
 import           Identifiers
-import           SemanticAnalysis.Analyser (SemData (..), Symbol (..),
-                                            SymbolTable (..), symTabLookup)
-import           SemanticAnalysis.Class    as Class
-import           SemanticAnalysis.TopLevel as TopLevel
-import qualified Syntax.Abs                as Latte
-import           Syntax.Code
-import           Utilities                 (dedupBy, single)
+import           SemanticAnalysis.Analyser  (SemData (..), Symbol (..),
+                                             SymbolTable (..), symTabLookup)
+import           SemanticAnalysis.Class     as Class
+import           SemanticAnalysis.TopLevel  as TopLevel (Metadata (..))
+import qualified Syntax.Abs                 as Latte
+import           Syntax.Code                (Code)
+import           Utilities                  (dedupBy, single)
 
-data Store = St {
-    stLabelCnt :: Integer,
-    stValCnt   :: Integer,
-    stSymCnt   :: Map.Map Latte.Ident Integer,
-    stCode     :: [Instr ()]
-}
-newtype Env = Env {
-    envSymbols :: Map.Map Latte.Ident LatVal
-}
-
-data LatVal = LatVal {valName :: ValIdent, _valType :: SType ()}
-
-type GenM = StateT Store (Reader Env)
-
-freshLabel :: GenM LabIdent
-freshLabel = labIdent . show <$> freshLabelIdx
-
-idxLabel :: String -> Integer -> LabIdent
-idxLabel s n = labIdent (s ++ show n)
-
-freshLabelIdx :: GenM Integer
-freshLabelIdx = do
-    n <- gets stLabelCnt
-    modify (\s -> s {stLabelCnt = n + 1})
-    return n
-
-mbAnnLabel :: LabIdent -> Maybe (Int, Int) -> Instr ()
-mbAnnLabel l Nothing         = ILabel () l
-mbAnnLabel l (Just (lf, lt)) = ILabelAnn () l (toInteger lf) (toInteger lt)
-
-freshVal :: GenM ValIdent
-freshVal = do
-    n <- gets stValCnt
-    modify (\s -> s {stValCnt = n + 1})
-    return $ valIdent $ show n
-
-localSyms :: [(Latte.Ident, LatVal)] -> GenM a -> GenM a
-localSyms syms = local (\e -> e {envSymbols = Map.union (Map.fromList syms) (envSymbols e)})
-
-cntSym :: Latte.Ident -> GenM Integer
-cntSym i = do
-    mbidx <- gets (Map.lookup i . stSymCnt)
-    case mbidx of
-        Just n -> do
-            modify (\s -> s { stSymCnt = Map.insert i (n + 1) (stSymCnt s)})
-            return $ n + 1
-        Nothing -> do
-            modify (\s -> s { stSymCnt = Map.insert i 0 (stSymCnt s)})
-            return 0
-
-askSym :: Latte.Ident -> GenM LatVal
-askSym i = do
-    mbval <- asks (Map.lookup i . envSymbols)
-    case mbval of
-        Just val -> return val
-        Nothing  -> error $ "symbol not found: " ++ Latte.showI i
-
-emit :: Instr () -> GenM ()
-emit instr = modify (\s -> s {stCode = instr : stCode s})
-
+-- Generate an Espresso program from a semantically analysed Latte program.
 generateEspresso :: TopLevel.Metadata SemData -> Program ()
 generateEspresso (TopLevel.Meta meta) =
     let cls = Map.elems meta
@@ -82,6 +27,7 @@ generateEspresso (TopLevel.Meta meta) =
         code = map genMthd $ dedupBy mthdQIdent $ concatMap clMethods cls
     in  Program () preamble code
 
+-- Generate an Espresso .class definition for a semantically analysed Latte class.
 genClDef :: Class.Class SemData -> Espresso.ClassDef ()
 genClDef cl = ClDef () (toSymIdent $ clName cl)
                 (map emitFldDef $ clFields cl)
@@ -90,11 +36,13 @@ genClDef cl = ClDef () (toSymIdent $ clName cl)
         emitFldDef fld = FldDef () (toSType $ fldType fld) (toSymIdent $ fldName fld)
         emitMthdDef mthd = MthdDef () (toFType $ mthdType mthd) (mthdQIdent mthd)
 
+-- Generate an Espresso method definition for .methods in a .class metadata segment
+-- from a semantically analysed Latte class.
 genMthd :: Class.Method SemData -> Espresso.Method ()
 genMthd mthd =
-    let code = runIdentity $ runReaderT (evalStateT go $ St 0 0 Map.empty []) (Env Map.empty)
+    let code = runGen go
         params = map (\(Latte.Arg _ t (Latte.Ident i)) ->
-            Param () (toSType $ () <$ t) (ValIdent $ "%a_" ++ i)) (mthdArgs mthd)
+            Param () (toSType $ () <$ t) (argValIdent i)) (mthdArgs mthd)
     in Espresso.Mthd () (toSType $ () <$ mthdRet mthd) (mthdQIdent mthd) params code
     where
         go = do
@@ -102,26 +50,32 @@ genMthd mthd =
                 decls = declArgs $ mthdArgs mthd
             emit $ mbAnnLabel entryLabel (codeLines (mthdBlk mthd))
             localSyms decls (genStmts stmts)
-            code <- gets (reverse . stCode)
-            if mthdRet mthd == Latte.Void () then return $ unifyVRet code else unifyRet (mthdRet mthd) code
+            code <- getCode
+            if mthdRet mthd == Latte.Void ()
+                then return $ unifyVRet code
+                else unifyRet (mthdRet mthd) code
 
+-- Generate Espresso code for a block of Latte statements.
 genStmts :: [Latte.Stmt SemData] -> GenM ()
 genStmts [] = return ()
 genStmts (stmt : stmts) = case stmt of
     Latte.Empty _     -> return ()
     Latte.BStmt _ (Latte.Block _ stmts') -> do
+        -- Scoping: save the environment, generate the block,
+        -- restore the environment to before-the-block.
         env <- ask
         genStmts stmts'
         local (const env) (genStmts stmts)
-    Latte.Decl _ t items -> do
-        let syms = semSymbols $ Latte.unwrap stmt
-        decls <- genItems t syms items
+    Latte.Decl _ _ items -> do
+        let syms = semSymbols $ single stmt
+        decls <- genItems syms items
         localSyms decls (genStmts stmts)
     Latte.Ass _ e1 e2 -> do
         (lvalue, type_) <- genLValue e1
         rvalue <- genExpr e2
         case type_ of
             VLocal    -> emit $ ISet () (valName lvalue) rvalue
+            -- Future-proof for fields and arrays.
             VIndirect -> emit $ IStore () rvalue (toVVal lvalue)
         genStmts stmts
     Latte.Incr _ i    -> do
@@ -139,89 +93,134 @@ genStmts (stmt : stmts) = case stmt of
     Latte.VRet _      -> do
         emit $ IVRet ()
         genStmts stmts
+    {-
+        ```lat
+        if (cond) { <body> }
+        <rest_of_code>
+        ```
+        ```esp
+        <cond code>
+        .L_then:
+          <body>
+          jump .L_after;  // Redundant jump for easier CFG generation.
+        .L_after:
+          <rest_of_code>
+    -}
     Latte.Cond _ cond stmtTrue -> do
-        l <- freshLabelIdx
-        let lthen = idxLabel "then" l
-            lelse = idxLabel "else" l
-        genCond cond lthen lelse
+        (lthen, lafter) <- condLabels
+        genCond cond lthen lafter
         emit $ mbAnnLabel lthen (codeLines stmtTrue)
         genStmts [stmtTrue]
-        emit $ IJmp () lelse -- Redundant jump for easier CFG generation.
-        emit $ ILabel () lelse
+        emit $ IJmp () lafter
+        emit $ ILabel () lafter
         genStmts stmts
+    {-
+        ```lat
+        if (cond) { <then_body> }
+        else      { <else_body> }
+        <rest_of_code>
+        ```
+        ```esp
+        <cond code>
+        .L_then:
+          <then_body>
+          jump .L_after;
+        .L_else:
+          <rest_of_code>
+          jump .L_after;  // Redundant jump for easier CFG generation.
+        .L_after:
+          <rest_of_code>
+    -}
     Latte.CondElse _ cond stmtTrue stmtFalse -> do
-        l <- freshLabelIdx
-        let lthen = idxLabel "then" l
-            lelse = idxLabel "else" l
-            lafter = idxLabel "after" l
+        (lthen, lelse, lafter) <- condElseLabels
         genCond cond lthen lelse
         emit $ mbAnnLabel lthen (codeLines stmtTrue)
         genStmts [stmtTrue]
         emit $ IJmp () lafter
         emit $ mbAnnLabel lelse (codeLines stmtFalse)
         genStmts [stmtFalse]
-        emit $ IJmp () lafter  -- Redundant jump for easier CFG generation.
+        emit $ IJmp () lafter
         emit $ ILabel () lafter
         genStmts stmts
+    {-
+        ```lat
+        while (cond) { <loop_body> }
+        <rest_of_code>
+        ```
+        ```esp
+        jump .L_cond;
+        .L_body
+          <loop_body>;
+          jump .L_cond;  // Redundant jump for easier CFG generation.
+        .L_cond
+          <cond code> // Jump .L_body if true, .L_after if not.
+        .L_after:
+          <rest_of_code>
+    -}
     Latte.While _ cond body -> do
-        l <- freshLabelIdx
-        let lcond = idxLabel "cond" l
-            lbody = idxLabel "body" l
-            lafter = idxLabel "after" l
+        (lcond, lbody, lafter) <- whileLabels
         emit $ IJmp () lcond
         emit $ mbAnnLabel lbody (codeLines body)
         genStmts [body]
-        emit $ IJmp () lcond  -- Redundant jump for easier CFG generation.
+        emit $ IJmp () lcond
         emit $ mbAnnLabel lcond (codeLines cond)
         genCond cond lbody lafter
         emit $ ILabel () lafter
         genStmts stmts
-    Latte.For {} -> error "for should be rewritten"
+    Latte.For {} -> error "for should be rewritten before Espresso codegen"
     Latte.SExp _ e          -> do
         _ <- genExpr e
         genStmts stmts
 
-genItems :: Latte.Type SemData -> SymbolTable -> [Latte.Item SemData] -> GenM [(Latte.Ident, LatVal)]
-genItems t syms = mapM genItem
+-- Generate code for item declarations, evaluating initialisers based on a symbol table.
+-- For declarations without initialisers emits a declaration to the type's default value.
+genItems :: SymbolTable -> [Latte.Item SemData] -> GenM [(Latte.Ident, EspVal)]
+genItems syms = mapM genItem
     where genItem item = do
             (i, val) <- genVal item
-            idx <- cntSym i
-            let suf = if idx == 0 then "" else '_':show idx
-                newval = valIdent $ Latte.showI i ++ suf
-            emit $ ISet () newval val
-            return (i, LatVal newval (toSType $ () <$ t))
+            let t = single val
+            vi <- valIdentFor i
+            emit $ ISet () vi (() <$ val)
+            return (i, EspVal vi t)
+          genVal :: Latte.Item SemData -> GenM (Latte.Ident, Val (SType ()))
           genVal item = case item of
             Latte.NoInit _ i -> do
                 let sym = fromJust $ symTabLookup i syms
-                    val = defaultVal (toSType $ symType sym)
-                return (i, val)
+                    t = toSType $ symType sym
+                    val = defaultVal t
+                return (i, t <$ val)
             Latte.Init _ i e -> do
+                let sem = single e
+                    t = toSType $ semType sem
                 val <- genExpr e
-                return (i, val)
+                return (i, t <$ val)
 
-declArgs :: [Latte.Arg Code] -> [(Latte.Ident, LatVal)]
+-- Turn method's arguments into Espresso values
+declArgs :: [Latte.Arg Code] -> [(Latte.Ident, EspVal)]
 declArgs = map declArg
     where
-        declArg :: Latte.Arg Code -> (Latte.Ident, LatVal)
-        declArg (Latte.Arg _ t i) = (i, LatVal (argValIdent $ toStr i) (toSType $ () <$ t))
+    declArg (Latte.Arg _ t i) = (i, EspVal (argValIdent $ toStr i) (toSType $ () <$ t))
 
+-- Generate Espresso code for a Latte expression.
 genExpr :: Latte.Expr SemData -> GenM (Val ())
 genExpr expr = case expr of
     Latte.EVar _ i        -> do
         val <- askSym i
         return (toVVal val)
     Latte.ELitInt _ n     -> return $ VInt () n
+    -- String literals are special and emit a separate instruction
+    -- so that assembly codegen can emit an allocation from a string constant.
     Latte.EString _ s     -> do
         newval <- freshVal
         emit $ IStr () newval s
         return $ VVal () (Ref () (Str ())) newval
     Latte.ELitTrue _      -> return $ VTrue ()
     Latte.ELitFalse _     -> return $ VFalse ()
-    Latte.ENullI _ _      -> error "should be converted to ENull"
-    Latte.ENullArr _ _    -> error "should be converted to ENullArr"
+    Latte.ENullI {}       -> error "ENullI should be converted to ENull before Espresso codegen"
+    Latte.ENullArr {}     -> error "ENullArr should be converted to ENull before Espresso codegen"
     Latte.ENull _ _       -> return $ VNull ()
-    Latte.ENew _ _        -> error "objects unimplemented"
-    Latte.ENewArr _ _ _   -> error "arrays unimplemented"
+    Latte.ENew {}         -> error "objects unimplemented"
+    Latte.ENewArr {}      -> error "arrays unimplemented"
     Latte.EApp sem e args   -> do
         let t = semType sem
         vals <- mapM genExpr args
@@ -236,22 +235,46 @@ genExpr expr = case expr of
     Latte.EMul _ e1 op e2 -> genOp e1 e2 (toEspressoMulOp op)
     Latte.EAdd _ e1 op e2 -> genOp e1 e2 (toEspressoAddOp op)
     Latte.ERel _ e1 op e2 -> genOp e1 e2 (toEspressoRelOp op)
+    {-
+    ```lat
+    a && b
+    ```
+    ```esp
+      %v_r := false;
+      <cond code>    // Jump to .L_true if true, .L_false if false.
+    .L_true:
+      %v_r := true;
+      jump .L_false; // Redundant jump for easier CFG generation.
+    .L_false:
+      <nothing, %v_r set to false>
+    ```
+    -}
     Latte.EAnd {}    -> do
-        l <- freshLabelIdx
-        let ltrue = idxLabel "true" l
-            lfalse = idxLabel "false" l
+        (ltrue, lfalse) <- andLabels
         newval <- freshVal
         emit $ ISet () newval (VFalse ())
         genCond expr ltrue lfalse
         emit $ ILabel () ltrue
         emit $ ISet () newval (VTrue ())
-        emit $ IJmp () lfalse -- Redundant jump for easier CFG generation.
+        emit $ IJmp () lfalse
         emit $ ILabel () lfalse
         return $ VVal () (Bool ()) newval
+    {-
+    ```lat
+    a || b
+    ```
+    ```esp
+      %v_r := true;
+      <cond code>    // Jump to .L_true if true, .L_false if false.
+    .L_false:
+      %v_r := false;
+      jump .L_true; // Redundant jump for easier CFG generation.
+    .L_true:
+      <nothing, %v_r set to false>
+    ```
+    -}
     Latte.EOr {}     -> do
-        l <- freshLabelIdx
-        let ltrue = idxLabel "true" l
-            lfalse = idxLabel "false" l
+        (ltrue, lfalse) <- orLabels
         newval <- freshVal
         emit $ ISet () newval (VTrue ())
         genCond expr ltrue lfalse
@@ -261,13 +284,38 @@ genExpr expr = case expr of
         emit $ ILabel () ltrue
         return $ VVal () (Bool ()) newval
 
+-- Generate code for a Latte expression interpreted as a boolean condition.
+-- Equivalent to a conditional jump to the first label if the condition is true
+-- or to the second if it is false.
 genCond :: Latte.Expr SemData -> LabIdent -> LabIdent -> GenM ()
 genCond e ltrue lfalse = case e of
+    {-
+    Short-circuting AND.
+    ```lat
+    a && b
+    ```
+    ```esp
+      <code for condition a> // Jump to .L_mid if true, .L_false if false.
+    .L_mid:
+      <code for condition b> // Jump to .L_true if true, .L_false if false.
+    ```
+    -}
     Latte.EAnd _ e1 e2 -> do
         lmid <- freshLabel
         genCond e1 lmid lfalse
         emit $ ILabel () lmid
         genCond e2 ltrue lfalse
+    {-
+    Short-circuting OR.
+    ```lat
+    a || b
+    ```
+    ```esp
+      <code for condition a> // Jump to .L_true if true, .L_mid if false.
+    .L_mid:
+      <code for condition b> // Jump to .L_true if true, .L_false if false.
+    ```
+    -}
     Latte.EOr _ e1 e2 -> do
         lmid <- freshLabel
         genCond e1 ltrue lmid
@@ -277,6 +325,7 @@ genCond e ltrue lfalse = case e of
         val <- genExpr e
         emit $ ICondJmp () val ltrue lfalse
 
+-- Generate code for the given unary operator applied to an expression.
 genUnOp :: Latte.Expr SemData -> UnOp () -> GenM (Val ())
 genUnOp e op = do
     let t = semType $ single e
@@ -285,6 +334,7 @@ genUnOp e op = do
     emit $ IUnOp () newval op val
     return $ VVal () (toSType t) newval
 
+-- Generate code for the given binary operator applied to given expressions.
 genOp :: Latte.Expr SemData -> Latte.Expr SemData -> Op () -> GenM (Val ())
 genOp e1 e2 op = do
     let t = semType $ single e1
@@ -294,50 +344,52 @@ genOp e1 e2 op = do
     emit $ IOp () newval val1 op val2
     return $ VVal () (toSType t) newval
 
+-- Create a special .L_exit label signifying the end of the method
+-- and turn all void returns to jumps to that label.
+-- Additionally add a jump at end of the initial instruction sequence
+-- in case the return was implicit. This may result in two consecutive jump
+-- instructions if there was an explicit return, but this will be removed
+-- as dead code in later phases.
 unifyVRet :: [Instr ()] -> [Instr ()]
-unifyVRet instr = let instr' = go instr []
-                  in  reverse instr' ++ [ILabel () exitLabel, IVRet ()]
+unifyVRet instrs =
+    let instr' = map retToJmp instrs
+    in instr' ++ [IJmp () exitLabel, ILabel () exitLabel, IVRet ()]
     where
-        go [] x            = IJmp () exitLabel:x
-        go (IVRet ():is) x = go is (IJmp () exitLabel:x)
-        go (i:is) x        = go is (i:x)
+        retToJmp (IVRet ()) = IJmp () exitLabel
+        retToJmp instr      = instr
 
+-- Create a special .L_exit label signifying the end of the method
+-- and turn all returns to jumps to that label. The return value
+-- is propagated to a phi instruction at the start of .L_exit.
+-- Additionally add a jump at the end of the initial instruction sequence.
+-- There are no implicit returns in this case, but there might be an empty,
+-- unreachable label. For example, when we had an if-else instruction in
+-- which both branches return, there will be an empty .L_after label created
+-- for that condition. Since the label is unreachable it will be removed as
+-- dead code, but to maintain the property that each basic block ends with a jump
+-- we need this artificial jump.
 unifyRet :: Latte.Type () -> [Instr ()] -> GenM [Instr ()]
-unifyRet t instr = do
-    (instr', phi) <- go instr [] [] entryLabel
-    idx <- cntSym (Latte.Ident "ret")
-    let val = valIdent $ "ret" ++ if idx == 0 then "" else '_':show idx
-    return $ reverse instr' ++ [ILabel () exitLabel, IPhi () val phi, IRet () (VVal () (toSType t) val)]
+unifyRet t instrs = do
+    let (phi, _) = foldl' (flip goPhis) ([], entryLabel) instrs
+        instrs' = map retToJmp instrs
+    val <- valIdentFor (Latte.Ident "ret")
+    return $ instrs' ++ [
+            IJmp () exitLabel,
+            ILabel () exitLabel,
+            IPhi () val phi,
+            IRet () (VVal () (toSType t) val)
+        ]
     where
-        go [] x phi _                  = return (x, phi)
-        go (i@(ILabel _ l):is) x phi _ = go is (i:x) phi l
-        go (i@(ILabelAnn _ l _ _):is) x phi _ = go is (i:x) phi l
-        go (IRet _ v:is) x phi l       = go is (IJmp () exitLabel:x) (PhiVar () l v:phi) l
-        go (i:is) x phi l              = go is (i:x) phi l
-
-toEspressoMulOp :: Latte.MulOp SemData -> Op ()
-toEspressoMulOp op = case op of
-    Latte.Times _ -> OpMul ()
-    Latte.Div _   -> OpDiv ()
-    Latte.Mod _   -> OpMod ()
-
-toEspressoAddOp :: Latte.AddOp SemData -> Op ()
-toEspressoAddOp op = case op of
-    Latte.Plus _  -> OpAdd ()
-    Latte.Minus _ -> OpSub ()
-
-toEspressoRelOp :: Latte.RelOp SemData -> Op ()
-toEspressoRelOp op = case op of
-    Latte.EQU _ -> OpEQU ()
-    Latte.NE _  -> OpNE ()
-    Latte.GE _  -> OpGE ()
-    Latte.GTH _ -> OpGTH ()
-    Latte.LE _  -> OpLE ()
-    Latte.LTH _ -> OpLTH ()
+        goPhis (ILabel _ l) (phi, _)        = (phi, l)
+        goPhis (ILabelAnn _ l _ _) (phi, _) = (phi, l)
+        goPhis (IRet _ v) (phi, l)          = (PhiVar () l v:phi, l)
+        goPhis _ x                          = x
+        retToJmp IRet {} = IJmp () exitLabel
+        retToJmp i       = i
 
 data ValType = VLocal | VIndirect
 
-genLValue :: Latte.Expr SemData -> GenM (LatVal, ValType)
+genLValue :: Latte.Expr SemData -> GenM (EspVal, ValType)
 genLValue e = case e of
     Latte.EVar _ i -> do
         val <- askSym i
@@ -352,58 +404,5 @@ genFun e = case e of
     Latte.EAcc {} -> error "objects unimplemented"
     _ -> error $ "internal error, invalid function " ++ show (() <$ e)
 
-defaultVal :: SType a -> Val ()
-defaultVal t = case deref t of
-    Int _   -> VInt () 0
-    Bool _  -> VFalse ()
-    Str _   -> VNull ()
-    Cl _ _  -> VNull ()
-    Arr _ _ -> VNull ()
-    _       -> error $ "invalid type " ++ show (() <$ t)
-
-deref :: SType a -> SType a
-deref t = case t of
-    Ref _ t' -> t'
-    _        -> t
-
-mthdQIdent :: Class.Method a -> QIdent ()
-mthdQIdent mthd =
-    let mName = (toSymIdent $ mthdName mthd)
-    in case mthdSelf mthd of
-        Just t  -> QIdent () (SymIdent $ showType t) mName
-        Nothing -> QIdent () (toSymIdent topLevelClassIdent) mName
-
-toSymIdent :: Latte.Ident -> SymIdent
-toSymIdent (Latte.Ident s) = SymIdent s
-
-codeLines :: (Functor f, Foldable f) => f SemData -> Maybe (Int, Int)
-codeLines stmt = do
-    lMin <- foldr (lift_ min . semToLine) Nothing stmt
-    lMax <- foldr (lift_ max . semToLine) Nothing stmt
-    return (lMin, lMax)
-    where semToLine s = fst <$> (semCode s >>= codePos)
-          lift_ _ Nothing x         = x
-          lift_ _ x Nothing         = x
-          lift_ f (Just x) (Just y) = Just $ f x y
-
-toSType :: Latte.Type a -> SType a
-toSType t = case t of
-    Latte.Int a                -> Int a
-    Latte.Str a                -> Ref a (Str a)
-    Latte.Bool a               -> Bool a
-    Latte.Void a               -> Void a
-    Latte.Var {}               -> error "not a simple type 'var'"
-    Latte.Arr a t'             -> Arr a (toSType t')
-    Latte.Cl a i               -> Cl a (toSymIdent i)
-    Latte.Fun{}                -> error "not a simple type Fun"
-    Latte.Ref _ (Latte.Int a)  -> Int a
-    Latte.Ref _ (Latte.Bool a) -> Bool a
-    Latte.Ref a t'             -> Ref a (deref $ toSType t')
-
-toFType :: Latte.Type a -> FType a
-toFType t = case t of
-    Latte.Fun a r ps -> FType a (toSType r) (map toSType ps)
-    _                -> error "not a function type"
-
-toVVal :: LatVal -> Val ()
-toVVal (LatVal i t) = VVal () t i
+toVVal :: EspVal -> Val ()
+toVVal (EspVal i t) = VVal () t i

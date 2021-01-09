@@ -33,10 +33,10 @@
 // Default version of CHK_SYSERR_VAL that tests against a -1 value.
 #define CHK_SYSERR(x, name) CHK_SYSERR_VAL(x, -1, name)
 
-#define NOTNULL(x)                                    \
-    if ((x) == NULL)                                  \
-    {                                                 \
-        TERMINATE("internal error. null reference."); \
+#define NOTNULL(x)                                      \
+    if ((x) == NULL)                                    \
+    {                                                   \
+        TERMINATE("internal error. null reference.\n"); \
     }
 
 typedef struct lat_string
@@ -96,14 +96,14 @@ const lat_string *lat_read_string()
 
 void lat_error()
 {
-    TERMINATE("runtime error");
+    TERMINATE("runtime error\n");
 }
 
 void lat_nullchk(const void *ptr)
 {
     if (ptr == NULL)
     {
-        TERMINATE("runtime error. attempt to dereference a null.");
+        TERMINATE("runtime error. attempt to dereference a null.\n");
     }
 }
 

@@ -1,10 +1,19 @@
 module Utilities where
 
 import           Control.Monad (unless, when)
-import           Data.Foldable
+import           Data.Bits     (Bits, countLeadingZeros, (.&.))
+import           Data.Foldable (find)
+import           Data.Int
 import           Data.List     (sort, sortOn)
 import qualified Data.Map      as Map
-import           Data.Maybe
+import           Data.Maybe    (fromJust, fromMaybe)
+
+isPowerOfTwo :: (Bits i, Integral i) => i -> Bool
+isPowerOfTwo 0 = False
+isPowerOfTwo n = n .&. (n-1) == 0
+
+log2 :: Int32 -> Int
+log2 = (31 -) . countLeadingZeros
 
 unlessM :: Monad m => m Bool -> m () -> m ()
 unlessM p a = do

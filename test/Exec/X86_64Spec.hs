@@ -9,6 +9,8 @@ import           System.Process
 import           Test.Hspec
 import           Utilities
 
+-- If True, the workdir is removed after execution ends.
+-- Set to False to inspect the compiler output when tests fail.
 cleanupEnabled :: Bool
 cleanupEnabled = True
 
