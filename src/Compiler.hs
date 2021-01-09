@@ -77,7 +77,7 @@ run opt = do
     genStep opt (espressoWithLivenessFile directory fileName) espressoWithLiveness
     printStringV v "Generating x86_64 assembly..."
     let assembly = generate cfgsWithLiveness
-    genOutput opt (unoptAssemblyFile directory fileName) assembly
+    genStep opt (unoptAssemblyFile directory fileName) assembly
     let optAssembly = unlines $ Peephole.optimise (lines assembly)
     genOutput opt (assemblyFile directory fileName) optAssembly
 

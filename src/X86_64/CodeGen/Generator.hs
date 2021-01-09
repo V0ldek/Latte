@@ -354,16 +354,21 @@ resetStack = do
     Emit.decrStack n
     setStack s'
 
+-- Set stack and descriptions to a state where all locals are saved on stack
+-- and nothing else is stored anywhere.
 endBlock :: GenM ()
 endBlock = do
-    locals <- gets (stackReservedSlots . stack)
+    s <- gets stack
+    let locals = stackReservedSlots s
     varSs <- gets vars
     let varSs' = Map.mapWithKey (\vi slot -> VarS {
                 varName = vi,
                 varType = varType $ varSs Map.! vi,
                 varLocs = [slotToLoc slot],
                 varAliases = [vi]}) locals
+        s'     = foldr (\vi x -> snd $ stackInsertReserved vi x) s (Map.keys locals)
     modify (\st -> st {allCode = bbCode st ++ allCode st,
                        bbCode = [],
                        regs = initialRegs,
+                       stack = s',
                        vars = varSs'})

@@ -10,3 +10,7 @@
 - Added IR generation.
 - Added Control Flow Graph and variable liveness analysis.
 - Added x86_64 assembler code generation for the core of the language.
+
+## 0.9.1
+
+- Fixed an issue where locals were unnecessarily moved out of stack and back again at end of a basic block when they were not alived in the preceding block.
