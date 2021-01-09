@@ -1,0 +1,96 @@
+entrypoints Program ;
+
+-- Override Ident definition to allow leading '~' for internal names.
+token SymIdent (letter | '~') (letter | digit | '_' | '\'')* ;
+
+token LabIdent '.' 'L' '_' (letter | digit | '_' | '\'')* ;
+
+-- Values are %v_x, arguments are %a_x.
+token ValIdent '%' ('v' | 'a') '_' (letter | digit | '_' | '\'')* ;
+
+QIdent. QIdent ::= SymIdent "." SymIdent ;
+
+Program. Program ::= Metadata [Method] ;
+
+Meta. Metadata ::= ".metadata" ":" "[" ".classes" ":" "[" [ClassDef] "]" "]";
+
+ClDef. ClassDef ::= SymIdent ":" "[" ".fields" ":" "[" [FieldDef] "]" ".methods" ":" "[" [MethodDef] "]" "]" ;
+
+FldDef. FieldDef ::= SType SymIdent ;
+
+MthdDef. MethodDef ::= FType QIdent;
+
+terminator FieldDef ";" ;
+terminator MethodDef ";" ;
+separator ClassDef "" ;
+
+FType. FType ::= SType "(" [SType] ")" ;
+
+Int.       SType ::= "int" ;
+Str.       SType ::= "string" ;
+Bool.      SType ::= "boolean" ;
+Void.      SType ::= "void" ;
+Arr.       SType ::= SType "[]" ;
+Cl.        SType ::= SymIdent ;
+Ref.       SType ::= SType "&" ;
+
+separator SType "," ;
+
+Mthd. Method ::= ".method " SType QIdent "(" [Param] ")" ":" "[" [Instr] "]" ;
+
+Param. Param ::= SType ValIdent ;
+separator Param "," ;
+
+separator Method "" ;
+
+ILabel.    Instr ::= LabIdent ":" ;
+ILabelAnn. Instr ::= LabIdent ":" "(" "lines" Integer "to" Integer ")" ;
+IVRet.     Instr ::= "return" ";" ;
+IRet.      Instr ::= "return" Val ";" ;
+IOp.       Instr ::= ValIdent ":=" Val Op Val ";" ;
+ISet.      Instr ::= ValIdent ":=" Val ";" ;
+IStr.      Instr ::= ValIdent ":=" String ";" ;
+IUnOp.     Instr ::= ValIdent ":=" UnOp Val ";" ;
+IVCall.    Instr ::= Call ";" ;
+ICall.     Instr ::= ValIdent ":=" Call ";" ;
+IJmp.      Instr ::= "jump" LabIdent ";" ;
+ICondJmp.  Instr ::= "jump" "if" Val "then" LabIdent "else" LabIdent ";" ;
+ILoad.     Instr ::= ValIdent ":=" "load" Val ";" ;
+IStore.    Instr ::= "store" Val Val ";" ;
+IFld.      Instr ::= ValIdent ":=" "fldptr" Val QIdent ";" ;
+IArr.      Instr ::= ValIdent ":=" "elemptr" Val "[" Val "]" ";" ;
+IPhi.      Instr ::= ValIdent ":=" "phi" "(" [PhiVariant] ")" ";" ;
+
+PhiVar. PhiVariant ::= LabIdent ":" Val ;
+
+Call.     Call ::= "call" SType QIdent "(" [Val] ")" ;
+CallVirt. Call ::= "callvirt" SType QIdent "(" [Val] ")" ;
+
+separator Instr "" ;
+separator Val "," ;
+separator PhiVariant "," ;
+
+VInt.    Val ::= Integer ;
+VNegInt. Val ::= "-" Integer ;
+VTrue.   Val ::= "true" ;
+VFalse.  Val ::= "false" ;
+VNull.   Val ::= "null" ;
+VVal.    Val ::= SType ValIdent ;
+
+OpAdd. Op ::= "+" ;
+OpSub. Op ::= "-" ;
+OpMul. Op ::= "*" ;
+OpDiv. Op ::= "/" ;
+OpMod. Op ::= "%" ;
+OpLTH. Op ::= "<" ;
+OpLE.  Op ::= "<=" ;
+OpGTH. Op ::= ">" ;
+OpGE.  Op ::= ">=" ;
+OpEQU. Op ::= "==" ;
+OpNE.  Op ::= "!=" ;
+
+UnOpNeg. UnOp ::= "-" ;
+UnOpNot. UnOp ::= "!" ;
+
+comment "//" ;
+comment "/*" "*/" ;

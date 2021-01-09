@@ -23,6 +23,7 @@ import           Error         (lineInfo)
 import           Identifiers
 import           Syntax.Abs
 import           Syntax.Code
+import           Utilities
 
 data Class a = Class { clName :: Ident, clBase :: Maybe (Class a), clFields :: [Field], clMethods :: [Method a] }
 
@@ -74,7 +75,7 @@ clCons name base flds mthds = do
 fldCons :: Type a -> Ident -> ClDef Code -> Field
 fldCons typ i = Fld i (() <$ typ)
 
--- Construct a method representing a toplevel function from its constituents.
+-- Construct a method representing a top level function from its constituents.
 -- Checks parameter naming rules.
 funCons :: Type a -> Ident -> [Arg Code] -> TopDef Code -> Either String (Method Code)
 funCons typ i args def = do
@@ -90,10 +91,10 @@ mthdCons typ i selfTyp args def = do
     cons <- baseMethodCons typ i (Just selfTyp) args
     return $ cons blk (unwrap def)
 
--- Common constructor for both toplevel functions and class methods.
+-- Common constructor for both top level functions and class methods.
 baseMethodCons :: Type a -> Ident -> Maybe (Type b) -> [Arg Code] -> Either String (Block Code -> Code -> Method Code)
 baseMethodCons typ i selfTyp args = do
-    let dupArgs = fst $ findDupsBy (\(Arg _ _ i) -> showI i) args
+    let dupArgs = fst $ findDupsBy (\(Arg _ _ i') -> showI i') args
     unless (null dupArgs) (dupArgsError dupArgs)
     return $ Mthd i (() <$ typ) (fmap (() <$) selfTyp) args
 
@@ -105,33 +106,36 @@ clExtend cl base = do
     flds <- combinedFlds
     mthds <- combinedMthds
     return $ Class (clName cl) (Just base) flds mthds
-    where combinedFlds = let flds = clFields base ++ clFields cl
-                             (_, dups) = findDupsBy fldName flds
-                         in  if null dups then Right flds else redefFldsError dups
-          combinedMthds = let subMthds = Map.fromList $ map (\m -> (mthdName m, m)) (clMethods cl)
-                         in run (clMethods base) subMthds
-                         where
-                            run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String [Method Code]
-                            run [] subMthds = return $ Map.elems subMthds
-                            run (b:bs) subMthds = let key = mthdName b
-                                                  in case Map.lookup key subMthds of
-                                                      Nothing -> run bs subMthds >>= (\bs -> return $ b : bs)
-                                                      Just m  -> do
-                                                          let bt = mthdTypeIgnSelf b
-                                                              mt = mthdTypeIgnSelf m
-                                                          if bt == mt then run bs (Map.delete key subMthds) >>= (\bs -> return $ m : bs)
-                                                                      else redefMthdError b m
+    where combinedFlds =
+            let flds = clFields base ++ clFields cl
+                (_, dups) = findDupsBy fldName flds
+            in  if null dups then Right flds else redefFldsError dups
+          combinedMthds =
+            let subMthds = Map.fromList $ map (\m -> (mthdName m, m)) (clMethods cl)
+            in run (clMethods base) subMthds
+            where
+                run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String [Method Code]
+                run [] subMthds = return $ Map.elems subMthds
+                run (b:bs) subMthds =
+                    let key = mthdName b
+                    in case Map.lookup key subMthds of
+                           Nothing -> run bs subMthds >>= (\bs' -> return $ b : bs')
+                           Just m  -> do
+                               let bt = mthdTypeIgnSelf b
+                                   mt = mthdTypeIgnSelf m
+                               if bt == mt then run bs (Map.delete key subMthds) >>= (\bs' -> return $ m : bs')
+                                           else redefMthdError b m
 
 -- Mostly used for debugging purposes.
 instance Show (Class a) where
-    show (Class (Ident name) base clFields clMethods) = intercalate "\n" (header : map indent (fields ++ methods))
+    show (Class (Ident name) base flds mthds) = intercalate "\n" (header : map indent (fields ++ methods))
         where
             header = ".class " ++ name ++ extends ++ ":"
             extends = case base of
                 Nothing    -> ""
                 Just clExt -> let Ident x = clName clExt in " extends " ++ x
-            fields = ".fields:" : map (indent . show) clFields
-            methods = ".methods:" : map (indent . show) clMethods
+            fields = ".fields:" : map (indent . show) flds
+            methods = ".methods:" : map (indent . show) mthds
             indent x = "  " ++ x
 
 instance Show (Method a) where
@@ -149,39 +153,8 @@ showType typ = case typ of
     Var _             -> "var"
     Arr _ t           -> showType t ++ "[]"
     Cl _ (Ident name) -> name
-    Fun _ typ typs    -> showType typ ++ "(" ++ intercalate ", " (map showType typs) ++ ")"
+    Fun _ t ts        -> showType t ++ "(" ++ intercalate ", " (map showType ts) ++ ")"
     Ref _ t           -> showType t
-
--- Find duplicates in a given list based on a key selector.
--- Returns a deduplicated list of duplicated keys and a list of values such that
--- there exists a value with the same key.
-findDupsBy :: Ord k => (a -> k) -> [a] -> ([k], [a])
-findDupsBy f ds = collect $ foldr checkForDup (Map.empty, []) ds
-    where
-    checkForDup a (m, dups) =
-        let k = f a
-        in  if Map.member k m then (m, (k, a) : dups) else (Map.insert k a m, dups)
-    collect (m, dups) =
-        let (ks, as) = unzip dups in (ks, foldr (\k as' -> m Map.! k : as') as ks)
-
--- Inner join based on a key selector of two lists.
--- Returns a deduplicated list of keys that participated in a join
--- and the list of resulting products.
-findConflictsBy :: Ord k => (a -> k) -> (b -> k) -> [a] -> [b] -> ([k], [(a, b)])
-findConflictsBy fa fb as bs = unzip $ foldr checkForConfl [] bs
-    where
-    m = Map.fromList $ zip (map fa as) as
-    checkForConfl b confls =
-        let k = fb b
-        in  case Map.lookup k m of
-                Nothing -> confls
-                Just a  -> (k, (a, b)) : confls
-
--- O(nlogn) deduplication.
-dedup :: Ord a => [a] -> [a]
-dedup xs = run (sort xs)
-    where run []     = []
-          run (x:xs) = x : run (dropWhile (== x) xs )
 
 -- Errors
 

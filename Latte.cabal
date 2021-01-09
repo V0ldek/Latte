@@ -4,10 +4,10 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 07a5b34f37f9b22ff69be83173953e37bf15964dd876bd3357dcc6e7e900a54a
+-- hash: 028249ea0ebe143be13f7c63bd5fe2393ecd494c17d63a038438551cb0e68895
 
 name:           Latte
-version:        0.8.0.0
+version:        0.9.0.0
 description:    Please see the README on GitHub at <https://github.com/V0ldek/Latte#readme>
 homepage:       https://github.com/githubuser/Latte#readme
 bug-reports:    https://github.com/githubuser/Latte/issues
@@ -27,23 +27,54 @@ source-repository head
 
 library
   exposed-modules:
+      Compiler
       ErrM
       Error
+      Espresso.CodeGen.Generator
+      Espresso.CodeGen.GenM
+      Espresso.CodeGen.Labels
+      Espresso.CodeGen.Operators
+      Espresso.ControlFlow.CFG
+      Espresso.ControlFlow.Liveness
+      Espresso.ControlFlow.Phi
+      Espresso.Interpreter
+      Espresso.Syntax.Abs
+      Espresso.Syntax.Lexer
+      Espresso.Syntax.Parser
+      Espresso.Syntax.Printer
+      Espresso.Types
+      Espresso.Utilities
       Identifiers
+      LatteIO
       SemanticAnalysis.Analyser
       SemanticAnalysis.Class
       SemanticAnalysis.ControlFlow
-      SemanticAnalysis.Toplevel
+      SemanticAnalysis.TopLevel
       Syntax.Abs
       Syntax.Code
       Syntax.Lexer
       Syntax.Parser
       Syntax.Printer
       Syntax.Rewriter
+      Utilities
+      X86_64.CodeGen.Consts
+      X86_64.CodeGen.Emit
+      X86_64.CodeGen.Epilogue
+      X86_64.CodeGen.Generator
+      X86_64.CodeGen.GenM
+      X86_64.CodeGen.Module
+      X86_64.CodeGen.Prologue
+      X86_64.CodeGen.RegisterAllocation
+      X86_64.CodeGen.Stack
+      X86_64.Loc
+      X86_64.Optimisation.Peephole
+      X86_64.Registers
+      X86_64.Size
   other-modules:
       Paths_Latte
   hs-source-dirs:
       src
+  ghc-options: -Wall -fno-warn-type-defaults
   build-depends:
       array >=0.5 && <0.6
     , base >=4.7 && <5
@@ -53,15 +84,17 @@ library
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , regex >=1.1 && <1.2
   default-language: Haskell2010
 
-executable latc
-  main-is: Main.hs
+executable espi
+  main-is: Espi.hs
   other-modules:
+      Latc_x86_64
       Paths_Latte
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Espi -Wall
   build-depends:
       Latte
     , array >=0.5 && <0.6
@@ -72,16 +105,60 @@ executable latc
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , regex >=1.1 && <1.2
+  default-language: Haskell2010
+
+executable latc_x86_64
+  main-is: Latc_x86_64.hs
+  other-modules:
+      Espi
+      Paths_Latte
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Latc_x86_64 -Wall
+  build-depends:
+      Latte
+    , array >=0.5 && <0.6
+    , base >=4.7 && <5
+    , containers >=0.6 && <0.7
+    , directory >=1.3 && <1.4
+    , filepath >=1.4 && <1.5
+    , hspec >=2.7 && <2.8
+    , mtl >=2.2 && <2.3
+    , process >=1.6 && <1.7
+    , regex >=1.1 && <1.2
+  default-language: Haskell2010
+
+test-suite Latte-exec-test
+  type: exitcode-stdio-1.0
+  main-is: X86_64Spec.hs
+  other-modules:
+      Paths_Latte
+  hs-source-dirs:
+      test/Exec
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is X86_64Spec -Wall
+  build-depends:
+      Latte
+    , array >=0.5 && <0.6
+    , base >=4.7 && <5
+    , containers >=0.6 && <0.7
+    , directory >=1.3 && <1.4
+    , filepath >=1.4 && <1.5
+    , hspec >=2.7 && <2.8
+    , mtl >=2.2 && <2.3
+    , process >=1.6 && <1.7
+    , regex >=1.1 && <1.2
   default-language: Haskell2010
 
 test-suite Latte-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      SemanticAnalysis.AcceptanceSpec
+      Compiler.CompilerSpec
+      Espresso.InterpreterSpec
       Paths_Latte
   hs-source-dirs:
-      test
+      test/Discovery
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       Latte
@@ -93,4 +170,5 @@ test-suite Latte-test
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , regex >=1.1 && <1.2
   default-language: Haskell2010

@@ -1,0 +1,22 @@
+.metadata: [
+  .classes: [
+    ~cl_TopLevel: [
+      .fields: [ ]
+      .methods: [
+        int() ~cl_TopLevel.main;
+        void(int) ~cl_TopLevel.printInt;
+        void(string) ~cl_TopLevel.printString;
+        void() ~cl_TopLevel.error;
+        int() ~cl_TopLevel.readInt;
+        string() ~cl_TopLevel.readString;
+      ]
+    ]
+  ]
+]
+
+.method int ~cl_TopLevel.main(): [
+  .L_entry:
+  %v_0 := "Hello, World!";
+  call void ~cl_TopLevel.printString (string& %v_0);
+  return 0;
+]

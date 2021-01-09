@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFoldable    #-}
 {-# LANGUAGE FlexibleInstances #-}
 module Syntax.Abs where
 
@@ -8,7 +9,7 @@ import           Data.Maybe (fromJust)
 type Pos = (Int, Int)
 newtype Ident = Ident String deriving (Eq, Ord, Show, Read)
 data Program a = Program a [TopDef a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 showI :: Ident -> String
 showI (Ident i) = i
@@ -37,7 +38,7 @@ data TopDef a
     = FnDef a (Type a) Ident [Arg a] (Block a)
     | ClDef a Ident (ClBlock a)
     | ClExtDef a Ident Ident (ClBlock a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor TopDef where
     fmap f x = case x of
@@ -52,7 +53,7 @@ instance Unwrappable TopDef where
     ClExtDef a _ _ _ -> a
 
 data Arg a = Arg a (Type a) Ident
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Arg where
     fmap f x = case x of
@@ -63,7 +64,7 @@ instance Unwrappable Arg where
     Arg a _ _  -> a
 
 data ClBlock a = ClBlock a [ClDef a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor ClBlock where
     fmap f x = case x of
@@ -76,7 +77,7 @@ instance Unwrappable ClBlock where
 data ClDef a
     = MthDef a (Type a) Ident [Arg a] (Block a)
     | FldDef a (Type a) Ident
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor ClDef where
     fmap f x = case x of
@@ -89,7 +90,7 @@ instance Unwrappable ClDef where
     FldDef a _ _     -> a
 
 data Block a = Block a [Stmt a]
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Block where
     fmap f x = case x of
@@ -113,7 +114,7 @@ data Stmt a
     | While a (Expr a) (Stmt a)
     | For a (Type a) Ident (Expr a) (Stmt a)
     | SExp a (Expr a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Stmt where
     fmap f x = case x of
@@ -148,7 +149,7 @@ instance Unwrappable Stmt where
     SExp a _         -> a
 
 data Item a = NoInit a Ident | Init a Ident (Expr a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Item where
     fmap f x = case x of
@@ -170,7 +171,7 @@ data Type a
     | Cl a Ident
     | Fun a (Type a) [Type a]
     | Ref a (Type a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Type where
     fmap f x = case x of
@@ -217,7 +218,7 @@ data Expr a
     | ERel a (Expr a) (RelOp a) (Expr a)
     | EAnd a (Expr a) (Expr a)
     | EOr a (Expr a) (Expr a)
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Expr where
     fmap f x = case x of
@@ -266,7 +267,7 @@ instance Unwrappable Expr where
     EOr a _ _     -> a
 
 data AddOp a = Plus a | Minus a
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor AddOp where
     fmap f x = case x of
@@ -279,7 +280,7 @@ instance Unwrappable AddOp where
     Minus a -> a
 
 data MulOp a = Times a | Div a | Mod a
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor MulOp where
     fmap f x = case x of
@@ -294,7 +295,7 @@ instance Unwrappable MulOp where
     Mod a   -> a
 
 data RelOp a = LTH a | LE a | GTH a | GE a | EQU a | NE a
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor RelOp where
     fmap f x = case x of

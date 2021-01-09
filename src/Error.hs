@@ -28,6 +28,6 @@ errorCtxMsg :: (Positioned a, WithContext a, Unwrappable f) => String -> f a -> 
 errorCtxMsg msg ctx = errorMsg msg (unwrap ctx) (getCtx $ unwrap ctx)
 
 lineInfo :: Maybe Pos -> String
-lineInfo pos = case pos of
+lineInfo a = case a of
     Nothing       -> ""
     Just (ln, ch) -> "Line " ++ show ln ++ ", character " ++ show ch

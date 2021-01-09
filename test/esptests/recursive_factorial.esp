@@ -1,0 +1,38 @@
+.metadata: [
+  .classes: [
+    ~cl_TopLevel: [
+      .fields: [ ]
+      .methods: [
+        int() ~cl_TopLevel.main;
+        int(int) ~cl_TopLevel.fac;
+        void(int) ~cl_TopLevel.printInt;
+        void(string) ~cl_TopLevel.printString;
+        void() ~cl_TopLevel.error;
+        int() ~cl_TopLevel.readInt;
+        string() ~cl_TopLevel.readString;
+      ]
+    ]
+  ]
+]
+
+.method int ~cl_TopLevel.main(): [
+  .L_entry:
+    %v_1 := call int ~cl_TopLevel.readInt();
+    %v_2 := call int ~cl_TopLevel.fac(int %v_1);
+    call void ~cl_TopLevel.printInt(int %v_2);
+    return 0;
+]
+
+.method int ~cl_TopLevel.fac(int %a_n): [
+  .L_entry:
+  .L_cond1:
+    %v_1 := int %a_n <= 1;
+    jump if bool %v_1 then .L_then1 else .L_else1;
+  .L_else1:
+    %v_2 := int %a_n - 1;
+    %v_3 := call int ~cl_TopLevel.fac(int %v_2);
+    %v_4 := int %a_n * int %v_3;
+    return int %v_4;
+  .L_then1:
+    return 1;
+]

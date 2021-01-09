@@ -1,5 +1,5 @@
 name:                Latte
-version:             0.8.0.0
+version:             0.9.0.0
 github:              "githubuser/Latte"
 license:             MIT
 author:              "Mateusz Gienieczko"
@@ -28,18 +28,34 @@ dependencies:
 - filepath >= 1.4 && < 1.5
 - process >= 1.6 && < 1.7
 - hspec >= 2.7 && < 2.8
+- regex >= 1.1 && < 1.2
 
 library:
   source-dirs: src
+  ghc-options:
+  - -Wall
+  - -fno-warn-type-defaults
 
 executables:
-  latc:
-    main:                Main.hs
+  latc_x86_64:
+    main:                Latc_x86_64.hs
     source-dirs:         app
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -main-is Latc_x86_64
+    - -Wall
+    dependencies:
+    - Latte
+  espi:
+    main:                Espi.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -main-is Espi
     - -Wall
     dependencies:
     - Latte
@@ -47,11 +63,22 @@ executables:
 tests:
   Latte-test:
     main:                Spec.hs
-    source-dirs:         test
+    source-dirs:         test/Discovery
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -Wall
+    dependencies:
+    - Latte
+  Latte-exec-test:
+    main:                X86_64Spec.hs
+    source-dirs:         test/Exec
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -main-is X86_64Spec
     - -Wall
     dependencies:
     - Latte
