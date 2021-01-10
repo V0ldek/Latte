@@ -1,4 +1,4 @@
-# Latte v0.9
+# Latte v0.9.1
 
 Compiler of the [Latte programming language](https://www.mimuw.edu.pl/~ben/Zajecia/Mrj2020/Latte/description.html) written in Haskell.
 
