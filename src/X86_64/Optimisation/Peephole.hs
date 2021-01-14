@@ -33,7 +33,8 @@ size1Opts = foldr optComp optId [
         optCmpZero2,
         optInc,
         optDec,
-        optZero
+        optZero,
+        optEmptyMov
     ]
 
 size2Opts :: (String, String) -> Maybe [String]
@@ -160,6 +161,20 @@ optCmpZero2 line =
     in if matched m
          then let (size, target) = extrMatch2 m
               in  Just ["  test" ++ size ++ " " ++ target ++ ", " ++ target ++ " " ++ matchSuf m]
+         else Nothing
+
+-- From:
+--   movx a, a
+-- To:
+-- _
+optEmptyMov :: String -> Maybe [String]
+optEmptyMov line =
+    let pattern_ = [re|mov[a-z] ([^[:space:]]+), ([^[:space:]]+)|]
+    --                               capt1            capt2
+        m = line ?=~ pattern_
+    in if matched m
+         then let (src, target) = extrMatch2 m
+              in if src == target then Just [] else Nothing
          else Nothing
 
 -- From:

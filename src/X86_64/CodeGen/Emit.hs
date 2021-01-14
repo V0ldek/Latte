@@ -8,6 +8,7 @@ module X86_64.CodeGen.Emit (
     call,
     cdq,
     cmp,
+    commentMultiline,
     constDef,
     decrStack,
     extern,
@@ -20,6 +21,8 @@ module X86_64.CodeGen.Emit (
     label,
     leave,
     leaOfConst,
+    movFromMemToReg,
+    movFromRegToMem,
     movToReg,
     movToStack,
     neg,
@@ -144,6 +147,7 @@ incrStack n comment_ = emitInd $ "subq " ++ lit64 n ++ ", %rsp" ++ comment comme
 idiv :: EmitM m => Size -> Loc -> m ()
 idiv size loc_ = case loc_ of
     LocImm {} -> error "internal error. idiv on an immediate."
+    LocPtr {} -> error "internal error. idiv with ptr"
     _         -> emitInd $ "idiv" ++ sizeSuf size ++ " " ++ loc size loc_
 
 -- Emit a multiplication operation between a source and destination location.
@@ -199,9 +203,27 @@ movToReg size src dest comment_ =
 -- where <s> is the AT&T instruction suffix based on <size>.
 movToStack :: EmitM m => Size -> Loc -> Int64 -> String -> m ()
 movToStack size src stackDest comment_ = case src of
-    LocReg reg_ -> emitInd $ bin "mov" size (sizedReg size reg_) (stack stackDest) comment_
-    LocImm int  -> emitInd $ bin "mov" size (lit32 int) (stack stackDest) comment_
-    LocStack _  -> error "internal error. mov from stack to stack"
+    LocReg reg_   -> emitInd $ bin "mov" size (sizedReg size reg_) (stack stackDest) comment_
+    LocPtr src' _ -> movToStack size src' stackDest comment_
+    LocImm int    -> emitInd $ bin "mov" size (lit32 int) (stack stackDest) comment_
+    LocImm64 int  -> emitInd $ bin "mov" size (lit64 int) (stack stackDest) comment_
+    LocStack _    -> error "internal error. mov from stack to stack"
+
+-- Emit a move from a memory location pointed to by the value in the `ptrReg`
+-- offset by `ptrOffset` bytes to the destination register.
+--  mov<s> <ptrOffset>(%<ptrReg>), %<destReg> # <comment>
+-- where <s> is the AT&T instruction suffix based on <size>.
+movFromMemToReg :: EmitM m => Size -> Reg -> Int64 -> Reg -> String -> m ()
+movFromMemToReg size ptrReg ptrOffset destReg comment_ =
+    emitInd $ bin "mov" size (ptr ptrReg ptrOffset) (sizedReg size destReg) comment_
+
+-- Emit a move from a register to the memory location pointed to by the
+-- value in the `ptrReg` offset by `ptrOffset` bytes.
+--   mov<s> %<srcReg>, <ptrOffset>(%<ptrReg>)
+-- where <s> is the AT&T instruction suffix based on <size>.
+movFromRegToMem :: EmitM m => Size -> Reg -> Reg -> Int64 -> m ()
+movFromRegToMem size srcReg ptrReg ptrOffset =
+    emitInd $ bin "mov" size (sizedReg size srcReg) (ptr ptrReg ptrOffset) ""
 
 -- Emit a negation operation on a register.
 --   neg %<reg>
@@ -277,6 +299,7 @@ setle reg_ = emitInd $ "setle " ++ sizedReg Byte reg_
 --   setne %<reg>
 setne :: EmitM m => Reg -> m ()
 setne reg_ = emitInd $ "setne " ++ sizedReg Byte reg_
+
 -- Emit a subtraction operation between a source and destination location (dest - src).
 --   sub<s> <src>, <dest>
 -- where <s> is the AT&T instruction suffix based on <size>.
@@ -322,6 +345,9 @@ comment :: String -> String
 comment [] = []
 comment s  = ' ':'#':' ':s
 
+commentMultiline :: EmitM m => [String] -> m ()
+commentMultiline = emit . unlines . map comment
+
 -- Emit an instruction indented by 2 spaces.
 emitInd :: EmitM m => String -> m ()
 emitInd s = emit ("  " ++ s)
@@ -329,6 +355,12 @@ emitInd s = emit ("  " ++ s)
 -- String representation of an integral literal.
 lit :: Int -> String
 lit n = '$':show n
+
+-- String representation of a memory access,
+-- where the base is located in the given register and is offset
+-- by the passed offset.
+ptr :: Reg -> Int64 -> String
+ptr r offset = show offset ++ "(" ++ sizedReg Quadruple r ++ ")"
 
 -- String representation of an integral literal.
 lit32 :: Int32 -> String
@@ -342,8 +374,10 @@ lit64 n = '$':show n
 loc :: Size -> Loc -> String
 loc size loc_ = case loc_ of
     LocReg r   -> sizedReg size r
+    LocPtr l _ -> loc size l
     LocStack n -> stack n
     LocImm n   -> lit32 n
+    LocImm64 n -> lit64 n
 
 -- String representation of a register (full 64-bits).
 reg :: String -> String

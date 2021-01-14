@@ -113,7 +113,7 @@ analyseBlk blk@(Block _ stmts) = do
 -- with its fields, methods and the 'self' symbol.
 enterCl :: Class a -> AnalyserM ()
 enterCl cl =
-  let fldSyms = map fldToSym (clFields cl)
+  let fldSyms = map fldToSym (Map.elems $ clFields cl)
       mthdSyms = map mthdToSym (clMethods cl)
       selfSym = Sym selfSymIdent (Cl () (clName cl)) undefined
    in do

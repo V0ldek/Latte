@@ -1,0 +1,38 @@
+.metadata: [
+  .classes: [
+    ~cl_TopLevel: [
+      .fields: [ ]
+      .methods: [
+        int() ~cl_TopLevel.main;
+        void(int) ~cl_TopLevel.printInt;
+        void(string) ~cl_TopLevel.printString;
+        void() ~cl_TopLevel.error;
+        int() ~cl_TopLevel.readInt;
+        string() ~cl_TopLevel.readString;
+      ]
+    ]
+    box: [
+        .fields: [
+            int value;
+        ]
+        .methods: [ ]
+    ]
+  ]
+]
+
+.method int ~cl_TopLevel.main(): [
+.L_entry:
+  %v_s := new box;
+  %v_fld := fldptr box& %v_s box.value;
+
+  %v_val := load int& %v_fld;
+  call void ~cl_TopLevel.printInt (int %v_val);
+
+  %v_val2 := int %v_val + 1;
+  store int %v_val2 int& %v_fld;
+  
+  %v_val3 := load int& %v_fld;
+  call void ~cl_TopLevel.printInt (int %v_val3);
+  
+  return 0;
+]

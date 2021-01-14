@@ -17,11 +17,11 @@ import Data.Char (ord)
 #endif
 #if __GLASGOW_HASKELL__ >= 503
 import Data.Array
-import Data.Array.Base (unsafeAt)
 #else
 import Array
 #endif
 #if __GLASGOW_HASKELL__ >= 503
+import Data.Array.Base (unsafeAt)
 import GHC.Exts
 #else
 import GlaExts
@@ -192,7 +192,7 @@ eitherResIdent tv s = treeFind resWords
                               | s == a = t
 
 resWords :: BTree
-resWords = b ">=" 25 (b ".fields" 13 (b "*" 7 (b "&" 4 (b "!=" 2 (b "!" 1 N N) (b "%" 3 N N)) (b ")" 6 (b "(" 5 N N) N)) (b "-" 10 (b "," 9 (b "+" 8 N N) N) (b ".classes" 12 (b "." 11 N N) N))) (b ":=" 19 (b ".methods" 16 (b ".method" 15 (b ".metadata" 14 N N) N) (b ":" 18 (b "/" 17 N N) N)) (b "<=" 22 (b "<" 21 (b ";" 20 N N) N) (b ">" 24 (b "==" 23 N N) N)))) (b "jump" 38 (b "elemptr" 32 (b "boolean" 29 (b "[]" 27 (b "[" 26 N N) (b "]" 28 N N)) (b "callvirt" 31 (b "call" 30 N N) N)) (b "fldptr" 35 (b "false" 34 (b "else" 33 N N) N) (b "int" 37 (b "if" 36 N N) N))) (b "store" 44 (b "null" 41 (b "load" 40 (b "lines" 39 N N) N) (b "return" 43 (b "phi" 42 N N) N)) (b "to" 47 (b "then" 46 (b "string" 45 N N) N) (b "void" 49 (b "true" 48 N N) N))))
+resWords = b "[" 26 (b ".fields" 13 (b "*" 7 (b "&" 4 (b "!=" 2 (b "!" 1 N N) (b "%" 3 N N)) (b ")" 6 (b "(" 5 N N) N)) (b "-" 10 (b "," 9 (b "+" 8 N N) N) (b ".classes" 12 (b "." 11 N N) N))) (b ";" 20 (b "/" 17 (b ".method" 15 (b ".metadata" 14 N N) (b ".methods" 16 N N)) (b ":=" 19 (b ":" 18 N N) N)) (b "==" 23 (b "<=" 22 (b "<" 21 N N) N) (b ">=" 25 (b ">" 24 N N) N)))) (b "lines" 39 (b "else" 33 (b "call" 30 (b "]" 28 (b "[]" 27 N N) (b "boolean" 29 N N)) (b "elemptr" 32 (b "callvirt" 31 N N) N)) (b "if" 36 (b "fldptr" 35 (b "false" 34 N N) N) (b "jump" 38 (b "int" 37 N N) N))) (b "return" 45 (b "newarr" 42 (b "new" 41 (b "load" 40 N N) N) (b "phi" 44 (b "null" 43 N N) N)) (b "to" 48 (b "then" 47 (b "store" 46 N N) N) (b "void" 50 (b "true" 49 N N) N))))
    where b s n = let bs = id s
                   in B bs (TS bs n)
 

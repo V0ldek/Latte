@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 -- Definitions of internal metadata types for language entities.
 module SemanticAnalysis.Class (
     Class (..),
@@ -25,7 +26,12 @@ import           Syntax.Abs
 import           Syntax.Code
 import           Utilities
 
-data Class a = Class { clName :: Ident, clBase :: Maybe (Class a), clFields :: [Field], clMethods :: [Method a] }
+data Class a = Class {
+    clName    :: Ident,
+    clBase    :: Maybe (Class a),
+    clFields  :: Map.Map Ident Field,
+    clMethods :: [Method a]
+} deriving Functor
 
 data Field = Fld { fldName :: Ident, fldType :: Type (), fldCode :: ClDef Code}
 
@@ -35,7 +41,8 @@ data Method a = Mthd {
      mthdSelf :: Maybe (Type ()),
      mthdArgs :: [Arg Code],
      mthdBlk  :: Block a,
-     mthdCode :: Code }
+     mthdCode :: Code
+} deriving Functor
 
 -- Get the type of the method, including the hidden `self` parameter.
 mthdType :: Method a -> Type ()
@@ -50,7 +57,7 @@ mthdTypeIgnSelf (Mthd _ ret _ args _ _) = Fun () ret (map (\(Arg _ t _) -> () <$
 
 -- Phony class serving as a root of the inheritance hierarchy.
 rootCl :: Class a
-rootCl = Class (Ident "~object") Nothing [] []
+rootCl = Class (Ident "~object") Nothing Map.empty []
 
 rootType :: Type ()
 rootType = Cl () (clName rootCl)
@@ -69,7 +76,8 @@ clCons name base flds mthds = do
     unless (null reservedFlds) (reservedFldError reservedFlds)
     unless (null reservedMthds) (reservedMthdsError reservedMthds)
     let base' = if isNothing base then Just rootCl else Nothing
-    return $ Class name base' flds mthds
+        fldMap = Map.fromList $ map (\f -> (fldName f, f)) flds
+    return $ Class name base' fldMap mthds
 
 -- Construct a field from ist constituents.
 fldCons :: Type a -> Ident -> ClDef Code -> Field
@@ -107,8 +115,8 @@ clExtend cl base = do
     mthds <- combinedMthds
     return $ Class (clName cl) (Just base) flds mthds
     where combinedFlds =
-            let flds = clFields base ++ clFields cl
-                (_, dups) = findDupsBy fldName flds
+            let flds = clFields base `Map.union` clFields cl
+                (_, dups) = findDupsBy fldName (Map.elems (clFields base) ++ Map.elems (clFields cl))
             in  if null dups then Right flds else redefFldsError dups
           combinedMthds =
             let subMthds = Map.fromList $ map (\m -> (mthdName m, m)) (clMethods cl)
@@ -134,7 +142,7 @@ instance Show (Class a) where
             extends = case base of
                 Nothing    -> ""
                 Just clExt -> let Ident x = clName clExt in " extends " ++ x
-            fields = ".fields:" : map (indent . show) flds
+            fields = ".fields:" : map (indent . show) (Map.elems flds)
             methods = ".methods:" : map (indent . show) mthds
             indent x = "  " ++ x
 

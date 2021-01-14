@@ -21,16 +21,16 @@ import           Utilities                  (dedupBy, single)
 
 -- Generate an Espresso program from a semantically analysed Latte program.
 generateEspresso :: TopLevel.Metadata SemData -> Program ()
-generateEspresso (TopLevel.Meta meta) =
+generateEspresso m@(TopLevel.Meta meta) =
     let cls = Map.elems meta
         preamble = Espresso.Meta () $ map genClDef cls
-        code = map genMthd $ dedupBy mthdQIdent $ concatMap clMethods cls
+        code = map (genMthd m) $ dedupBy mthdQIdent $ concatMap clMethods cls
     in  Program () preamble code
 
 -- Generate an Espresso .class definition for a semantically analysed Latte class.
 genClDef :: Class.Class SemData -> Espresso.ClassDef ()
 genClDef cl = ClDef () (toSymIdent $ clName cl)
-                (map emitFldDef $ clFields cl)
+                (map emitFldDef $ Map.elems $ clFields cl)
                 (map emitMthdDef $ clMethods cl)
     where
         emitFldDef fld = FldDef () (toSType $ fldType fld) (toSymIdent $ fldName fld)
@@ -38,9 +38,9 @@ genClDef cl = ClDef () (toSymIdent $ clName cl)
 
 -- Generate an Espresso method definition for .methods in a .class metadata segment
 -- from a semantically analysed Latte class.
-genMthd :: Class.Method SemData -> Espresso.Method ()
-genMthd mthd =
-    let code = runGen go
+genMthd :: TopLevel.Metadata SemData -> Class.Method SemData -> Espresso.Method ()
+genMthd meta mthd =
+    let code = runGen meta go
         params = map (\(Latte.Arg _ t (Latte.Ident i)) ->
             Param () (toSType $ () <$ t) (argValIdent i)) (mthdArgs mthd)
     in Espresso.Mthd () (toSType $ () <$ mthdRet mthd) (mthdQIdent mthd) params code
@@ -75,7 +75,6 @@ genStmts (stmt : stmts) = case stmt of
         rvalue <- genExpr e2
         case type_ of
             VLocal    -> emit $ ISet () (valName lvalue) rvalue
-            -- Future-proof for fields and arrays.
             VIndirect -> emit $ IStore () rvalue (toVVal lvalue)
         genStmts stmts
     Latte.Incr _ i    -> do
@@ -218,9 +217,18 @@ genExpr expr = case expr of
     Latte.ELitFalse _     -> return $ VFalse ()
     Latte.ENullI {}       -> error "ENullI should be converted to ENull before Espresso codegen"
     Latte.ENullArr {}     -> error "ENullArr should be converted to ENull before Espresso codegen"
-    Latte.ENull _ _       -> return $ VNull ()
-    Latte.ENew {}         -> error "objects unimplemented"
-    Latte.ENewArr {}      -> error "arrays unimplemented"
+    Latte.ENull _ t       -> return $ VNull () (toSType $ () <$ t)
+    Latte.ENew _ t        -> do
+        let t' = deref $ toSType $ () <$ t
+        newval <- freshVal
+        emit $ INew () newval t'
+        return (VVal () (Ref () t') newval)
+    Latte.ENewArr _ t e      -> do
+        let t' = toSType $ () <$ t
+        sizeVal <- genExpr e
+        newval <- freshVal
+        emit $ INewArr () newval t' sizeVal
+        return (VVal () (Ref () $ Arr () (deref t')) newval)
     Latte.EApp sem e args   -> do
         let t = semType sem
         vals <- mapM genExpr args
@@ -228,13 +236,18 @@ genExpr expr = case expr of
         newval <- freshVal
         emit $ ICall () newval (Call () (toSType t) fun vals)
         return (VVal () (toSType t) newval)
-    Latte.EIdx {}         -> error "arrays unimplemented"
-    Latte.EAcc {}         -> error "objects unimplemented"
-    Latte.ENeg _ e        -> genUnOp e (UnOpNeg ())
-    Latte.ENot _ e        -> genUnOp e (UnOpNot ())
-    Latte.EMul _ e1 op e2 -> genOp e1 e2 (toEspressoMulOp op)
-    Latte.EAdd _ e1 op e2 -> genOp e1 e2 (toEspressoAddOp op)
-    Latte.ERel _ e1 op e2 -> genOp e1 e2 (toEspressoRelOp op)
+    Latte.EIdx {}           -> error "arrays unimplemented"
+    Latte.EAcc _ e fldIdent -> do
+        fldPtr <- genFldAcc e fldIdent
+        let t = deref $ valType_ fldPtr
+        newval <- freshVal
+        emit $ ILoad () newval (toVVal fldPtr)
+        return (VVal () t newval)
+    Latte.ENeg _ e          -> genUnOp e (UnOpNeg ())
+    Latte.ENot _ e          -> genUnOp e (UnOpNot ())
+    Latte.EMul _ e1 op e2   -> genOp e1 e2 (toEspressoMulOp op)
+    Latte.EAdd _ e1 op e2   -> genOp e1 e2 (toEspressoAddOp op)
+    Latte.ERel _ e1 op e2   -> genRelOp e1 e2 (toEspressoRelOp op)
     {-
     ```lat
     a && b
@@ -344,6 +357,15 @@ genOp e1 e2 op = do
     emit $ IOp () newval val1 op val2
     return $ VVal () (toSType t) newval
 
+-- Generate code for the given binary relational operator applied to given expressions.
+genRelOp :: Latte.Expr SemData -> Latte.Expr SemData -> Op () -> GenM (Val ())
+genRelOp e1 e2 op = do
+    val1 <- genExpr e1
+    val2 <- genExpr e2
+    newval <- freshVal
+    emit $ IOp () newval val1 op val2
+    return $ VVal () (Bool ()) newval
+
 -- Create a special .L_exit label signifying the end of the method
 -- and turn all void returns to jumps to that label.
 -- Additionally add a jump at end of the initial instruction sequence
@@ -395,14 +417,29 @@ genLValue e = case e of
         val <- askSym i
         return (val, VLocal)
     Latte.EIdx {} -> error "arrays unimplemented"
-    Latte.EAcc {} -> error "objects unimplemented"
+    Latte.EAcc _ objExpr fldIdent -> do
+        fld <- genFldAcc objExpr fldIdent
+        return (fld, VIndirect)
     _ -> error $ "internal error, invalid lvalue " ++ show (() <$ e)
+
+-- Generate a field access on the value of the given expression.
+genFldAcc :: Latte.Expr SemData -> Latte.Ident -> GenM EspVal
+genFldAcc e i = do
+    obj <- genExpr e
+    let t = valType obj
+    case deref t of
+        Cl _ clIdent -> do
+            cl <- askClass clIdent
+            case Map.lookup i (clFields cl) of
+                Just fld -> do
+                    newval <- freshVal
+                    emit $ IFld () newval obj (QIdent () clIdent (toSymIdent $ fldName fld))
+                    return $ EspVal newval (Ref () $ toSType $ fldType fld)
+                Nothing -> error $ "internal error. invalid field " ++ Latte.showI i ++ " for type " ++ toStr clIdent
+        _ -> error $ "internal error. invalid type in fldAcc " ++ show (() <$ t)
 
 genFun :: Latte.Expr SemData -> GenM (QIdent ())
 genFun e = case e of
-    Latte.EVar _ i    -> return $ QIdent () (SymIdent $ toStr topLevelClassIdent) (SymIdent $ toStr i)
-    Latte.EAcc {} -> error "objects unimplemented"
+    Latte.EVar _ i    -> return $ QIdent () (toSymIdent topLevelClassIdent) (toSymIdent i)
+    Latte.EAcc {} -> error "methods unimplemented"
     _ -> error $ "internal error, invalid function " ++ show (() <$ e)
-
-toVVal :: EspVal -> Val ()
-toVVal (EspVal i t) = VVal () t i

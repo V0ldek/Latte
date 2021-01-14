@@ -13,9 +13,11 @@ import qualified Data.Set                          as Set
 import           Espresso.ControlFlow.CFG          (CFG (..), Node (..))
 import           Espresso.ControlFlow.Liveness
 import           Espresso.Syntax.Abs
-import           Espresso.Types                    (isInt, isStr, valType)
+import           Espresso.Types                    (deref, isInt, isStr,
+                                                    valType)
 import           Identifiers
 import           Utilities                         (isPowerOfTwo, log2, single)
+import           X86_64.Class
 import           X86_64.CodeGen.Consts
 import qualified X86_64.CodeGen.Emit               as Emit
 import           X86_64.CodeGen.Epilogue
@@ -28,15 +30,17 @@ import           X86_64.Loc
 import           X86_64.Registers
 import           X86_64.Size
 
-generate :: [(CFG Liveness, Method a)] -> String
-generate mthds =
+generate :: Metadata () -> [(CFG Liveness, Method a)] -> String
+generate (Meta () clDefs) mthds =
     let (mthds', cs) = foldr go ([], constsEmpty) mthds
-    in  generateModule mthds' cs
+    in  generateModule cls mthds' cs
     where
+    cls = map compileClass clDefs
+    clMap = Map.fromList $ map (\cl -> (clName cl, cl)) cls
     go (cfg@(CFG g), Mthd _ _ qi ps _) (xs, cs) =
         let initStack = stackReserve (map (second typeSize) locals) stackEmpty
             initState = St [] [] cs initStack Set.empty initialRegs Map.empty Map.empty 0
-            st = runReader (execStateT goOne initState) (Env (labelFor qi) emptyLiveness)
+            st = runReader (execStateT goOne initState) (Env (labelFor qi) emptyLiveness clMap)
             rawMthd = CmpMthd (toStr $ labelFor qi entryLabel) [] (reverse $ allCode st) []
             mthd = withEpilogue st $ withPrologue qi st rawMthd
         in (mthd:xs, consts st)
@@ -49,11 +53,11 @@ generate mthds =
                 addParams ps
                 let nodes = Map.elems g
                     entryNode = single $ filter ((== entryLabel) . nodeLabel) nodes
-                    exitNode = single $ filter ((== exitLabel) . nodeLabel) nodes
-                    otherNodes = filter ((\l -> l /= entryLabel && l /= exitLabel) . nodeLabel) nodes
+                    exitNode = single $ filter (any isRet . nodeCode) nodes
+                    otherNodes = filter ((\l -> l /= nodeLabel entryNode && l /= nodeLabel exitNode) . nodeLabel) nodes
                 genNode entryNode
                 mapM_ genNode otherNodes
-                genNode exitNode
+                when (nodeLabel entryNode /= nodeLabel exitNode) (genNode exitNode)
             genNode node = do
                 traceM' ("===== starting block: " ++ toStr (nodeLabel node))
                 mapM_ genInstr (nodeCode node)
@@ -62,9 +66,13 @@ generate mthds =
                 s <- gets stack
                 varS <- getVarS vi
                 let (loc, s') = stackInsertReserved vi s
-                    varS' = varS {varLocs = [loc]}
+                    varS' = setLoc loc varS
                 setVarS varS'
                 setStack s'
+            isRet instr = case instr of
+                IRet _ _ -> True
+                IVRet _  -> True
+                _        -> False
 
 -- Set the descriptions for method parameters.
 addParams :: [Param a] -> GenM ()
@@ -77,7 +85,8 @@ addParams ps = mapM_ (uncurry addParam) (zip ps [0..])
                 LocReg reg_ -> saveInReg vi reg_
                 LocStack {} -> do
                     varS <- getVarS vi
-                    setVarS varS {varLocs = [loc]}
+                    let varS' = setLoc loc varS
+                    setVarS varS'
                 _ -> error $ "addParams: invalid location from argLoc " ++ show loc
 
 {-
@@ -168,17 +177,19 @@ genInstr instr =
                         setVarS othVarS'
                         newVar vi t
                         varS <- getVarS vi
-                        setVarS varS {varLocs = varLocs othVarS', varAliases = varAliases othVarS'}
+                        setVarS varS {varLocs = varLocs othVarS', varAliases = varAliases othVarS', varKind = varKind othVarS'}
                     _ -> do
                         newVar vi t
                         varS <- getVarS vi
-                        setVarS $ case v of
-                            VInt _ n -> varS {varLocs = [LocImm (fromInteger n)]}
-                            VNegInt _ n -> varS {varLocs = [LocImm (fromInteger $ -n)]}
-                            VTrue _ -> varS {varLocs = [LocImm 1]}
-                            VFalse _ -> varS {varLocs = [LocImm 0]}
-                            VNull _ -> varS {varLocs = [LocImm 0]}
-                            VVal {} -> error "impossible"
+                        let loc = case v of
+                                VInt _ n    -> LocImm (fromInteger n)
+                                VNegInt _ n -> LocImm (fromInteger $ -n)
+                                VTrue _     -> LocImm 1
+                                VFalse _    -> LocImm 0
+                                VNull {}    -> LocImm 0
+                                VVal {}     -> error "impossible"
+                            varS' = setLoc loc varS
+                        setVarS varS'
                 useVal v
             IStr _ vi str -> do
                 let len = toInteger $ length str
@@ -205,8 +216,8 @@ genInstr instr =
                             newVar vi t
                             varS <- getVarS vi
                             setVarS $ case v of
-                                VInt _ n -> varS {varLocs = [LocImm (fromInteger (-n))]}
-                                VNegInt _ n -> varS {varLocs = [LocImm (fromInteger n)]}
+                                VInt _ n -> setLoc (LocImm (fromInteger (-n))) varS
+                                VNegInt _ n -> setLoc (LocImm (fromInteger n)) varS
                                 _ -> error "internal error. invalid operand to UnOpNeg."
                 UnOpNot _ -> do
                     let t = () <$ valType v
@@ -222,8 +233,8 @@ genInstr instr =
                             newVar vi t
                             varS <- getVarS vi
                             setVarS $ case v of
-                                VTrue _ -> varS {varLocs = [LocImm 0]}
-                                VFalse _ -> varS {varLocs = [LocImm 1]}
+                                VTrue _ -> setLoc (LocImm 0) varS
+                                VFalse _ -> setLoc (LocImm 1) varS
                                 _ -> error "internal error. invalid operand to UnOpNot"
             IVCall _ call -> case call of
                     Call _ _ qi args -> genCall (getCallTarget qi) args
@@ -234,6 +245,47 @@ genInstr instr =
                         CallVirt {}       -> error "callvirt unimplemented"
                 newVar vi (() <$ t)
                 saveInReg vi rax
+            ILoad _ vi val -> do
+                loc <- getValLoc val
+                case loc of
+                    LocPtr _ offset -> do
+                        let t = () <$ deref (valType val)
+                        reg_ <- moveToAnyReg val
+                        useVal val
+                        freeReg reg_
+                        traceM' $ "Emitting load " ++ toStr vi ++ " of type " ++ show t
+                        Emit.movFromMemToReg (typeSize t) reg_ offset reg_ ("load " ++ toStr vi)
+                        newVar vi t
+                        saveInReg vi reg_
+                    _ -> error $ "internal error. load on nonptr location " ++ show loc
+            IStore _ v1 v2 -> do
+                loc <- getValLoc v2
+                case loc of
+                    LocPtr _ offset -> do
+                        let t = valType v1
+                        srcReg <- moveToAnyReg v1
+                        useVal v1
+                        freeReg srcReg
+                        reserveReg srcReg
+                        destPtrReg <- moveToAnyReg v2
+                        useVal v2
+                        unreserveReg srcReg
+                        Emit.movFromRegToMem (typeSize t) srcReg destPtrReg offset
+                    _ -> error $ "internal error. store on nonptr location " ++ show loc
+            INew _ vi t -> case t of
+                Cl _ clIdent -> do
+                    cl <- getClass clIdent
+                    let sizeArg = VInt () (toInteger $ clSize cl)
+                    genCall "lat_new_instance" [sizeArg]
+                    newVar vi (Ref () (() <$ t))
+                    saveInReg vi rax
+                _ -> error $ "internal error. new on nonclass " ++ show t
+            IJmp _ li -> do
+                li' <- label li
+                resetStack
+                saveBetweenBlocks
+                endBlock
+                Emit.jmp li'
             ICondJmp _ v l1 l2 -> do
                 loc <- getValLoc v
                 l1' <- label l1
@@ -254,12 +306,15 @@ genInstr instr =
                         endBlock
                         Emit.jz l2'
                         Emit.jmp l1'
-            IJmp _ li -> do
-                li' <- label li
-                resetStack
-                saveBetweenBlocks
-                endBlock
-                Emit.jmp li'
+            IFld _ vi val (QIdent _ cli fldi) -> do
+                cl <- getClass cli
+                case Map.lookup fldi (clFlds cl) of
+                    Just fld -> do
+                        newVarPtr vi (Ref () (fldType fld)) (fldOffset fld)
+                        locs <- getValLocs val
+                        forM_ locs (saveInLoc vi)
+                        useVal val
+                    Nothing -> error $ "internal error. no such field " ++ toStr cli ++ "." ++ toStr fldi
             IPhi {} -> error "internal error. phi should be eliminated before assembly codegen"
             _ -> error $ "unimplemented " ++ show instr
         fullTrace
@@ -361,11 +416,12 @@ endBlock = do
     s <- gets stack
     let locals = stackReservedSlots s
     varSs <- gets vars
-    let varSs' = Map.mapWithKey (\vi slot -> VarS {
+    let varSs' = Map.mapWithKey (\vi slot -> setLoc (slotToLoc slot) VarS {
                 varName = vi,
                 varType = varType $ varSs Map.! vi,
-                varLocs = [slotToLoc slot],
-                varAliases = [vi]}) locals
+                varAliases = [vi],
+                varLocs = [],
+                varKind = varKind $ varSs Map.! vi}) locals
         s'     = foldr (\vi x -> snd $ stackInsertReserved vi x) s (Map.keys locals)
     modify (\st -> st {allCode = bbCode st ++ allCode st,
                        bbCode = [],

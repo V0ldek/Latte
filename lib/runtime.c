@@ -77,6 +77,19 @@ const lat_string *lat_new_string(const char *str, size_t len)
     return result;
 }
 
+void *lat_new_instance(size_t size)
+{
+    if (size == 0)
+    {
+        TERMINATE("Invalid instance size 0");
+    }
+
+    void *result = calloc(1, size);
+    CHK_SYSERR_VAL(result, NULL, "calloc")
+
+    return result;
+}
+
 const lat_string *lat_read_string()
 {
     char *line = NULL;

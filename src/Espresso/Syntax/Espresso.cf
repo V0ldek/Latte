@@ -27,7 +27,6 @@ separator ClassDef "" ;
 FType. FType ::= SType "(" [SType] ")" ;
 
 Int.       SType ::= "int" ;
-Str.       SType ::= "string" ;
 Bool.      SType ::= "boolean" ;
 Void.      SType ::= "void" ;
 Arr.       SType ::= SType "[]" ;
@@ -53,6 +52,8 @@ IStr.      Instr ::= ValIdent ":=" String ";" ;
 IUnOp.     Instr ::= ValIdent ":=" UnOp Val ";" ;
 IVCall.    Instr ::= Call ";" ;
 ICall.     Instr ::= ValIdent ":=" Call ";" ;
+INew.      Instr ::= ValIdent ":=" "new" SType ";" ;
+INewArr.   Instr ::= ValIdent ":=" "newarr" SType "[" Val "]" ";" ;
 IJmp.      Instr ::= "jump" LabIdent ";" ;
 ICondJmp.  Instr ::= "jump" "if" Val "then" LabIdent "else" LabIdent ";" ;
 ILoad.     Instr ::= ValIdent ":=" "load" Val ";" ;
@@ -74,7 +75,7 @@ VInt.    Val ::= Integer ;
 VNegInt. Val ::= "-" Integer ;
 VTrue.   Val ::= "true" ;
 VFalse.  Val ::= "false" ;
-VNull.   Val ::= "null" ;
+VNull.   Val ::= SType "null" ;
 VVal.    Val ::= SType ValIdent ;
 
 OpAdd. Op ::= "+" ;

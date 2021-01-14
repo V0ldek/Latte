@@ -1,2 +1,5 @@
 .stack-work/
 *~
+./latc_x86_64
+./espi
+./lib/runtime.o

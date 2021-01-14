@@ -34,12 +34,15 @@ spec = parallel $ do
     describe "Core bad" $ do
         tests <- runIO $ getLatTestsFromDir coreBadDir
         mapM_ badTest tests
-    dont $ describe "Extension struct good" $ do
+    describe "Extension struct good" $ do
         tests <- runIO $ getLatTestsFromDir structGoodDir
         mapM_ goodTest tests
     dont $ describe "Extension arrays good" $ do
         tests <- runIO $ getLatTestsFromDir arraysGoodDir
         mapM_ goodTest tests
+    describe "Extension arrays bad" $ do
+        tests <- runIO $ getLatTestsFromDir arraysBadDir
+        mapM_ badTest tests
     dont $ describe "Extension objects1 good" $ do
         tests <- runIO $ getLatTestsFromDir objects1GoodDir
         mapM_ goodTest tests
@@ -67,34 +70,42 @@ goodTest latTest =
         out = runStaticIO (go latTest) [] fs
         esp = staticContents $ fromJust $
             find (\f -> staticPath f == espressoFile "." (tstName latTest)) (staticFiles $ staticFS out)
-        espOpt = staticContents $ fromJust $
-            find (\f -> staticPath f == espressoOptFile "." (tstName latTest)) (staticFiles $ staticFS out)
+        espLin = staticContents $ fromJust $
+            find (\f -> staticPath f == espressoWithoutDeadFile "." (tstName latTest)) (staticFiles $ staticFS out)
         espPhi = staticContents $ fromJust $
             find (\f -> staticPath f == espressoWithUnfoldedPhiFile "." (tstName latTest)) (staticFiles $ staticFS out)
+        espOpt = staticContents $ fromJust $
+            find (\f -> staticPath f == espressoOptimisedFile "." (tstName latTest)) (staticFiles $ staticFS out)
         asm = staticContents $ fromJust $
             find (\f -> staticPath f == assemblyFile "." (tstName latTest)) (staticFiles $ staticFS out)
         espPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer esp
-        espOptPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espOpt
+        espLinPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espLin
         espPhiPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espPhi
+        espOptPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espOpt
     it (tstName latTest ++ " returns 0") $ LatteIO.staticCode out `shouldBe` ExitSuccess
-    case sequence [espPar, espOptPar, espPhiPar] of
-        Right [espProg, espOptProg, espPhiProg] -> do
+    case sequence [espPar, espLinPar, espPhiPar, espOptPar] of
+        Right [espProg, espLinProg, espPhiProg, espOptProg] -> do
             let espOut = runStaticIO (interpret $ unwrapPos espProg) (tstIn latTest) (StaticFS [])
-                espOptOut = runStaticIO (interpret $ unwrapPos espOptProg) (tstIn latTest) (StaticFS [])
+                espLinOut = runStaticIO (interpret $ unwrapPos espLinProg) (tstIn latTest) (StaticFS [])
                 espPhiOut = runStaticIO (interpret $ unwrapPos espPhiProg) (tstIn latTest) (StaticFS [])
+                espOptOut = runStaticIO (interpret $ unwrapPos espOptProg) (tstIn latTest) (StaticFS [])
             it (tstName latTest ++ " is OK") $ LatteIO.staticErr out `shouldBe` tstErr latTest
             it (tstName latTest ++ " Espresso returns 0") $
                 LatteIO.staticCode espOut `shouldBe` ExitSuccess
             it (tstName latTest ++ " Espresso output is correct") $
                 normaliseOut (LatteIO.staticOut espOut) `shouldBe` normaliseOut (tstOut latTest)
-            it (tstName latTest ++ " optimised Espresso returns 0") $
-                LatteIO.staticCode espOptOut `shouldBe` ExitSuccess
-            it (tstName latTest ++ " optimised Espresso output is correct") $
-                normaliseOut (LatteIO.staticOut espOptOut) `shouldBe` normaliseOut (tstOut latTest)
+            it (tstName latTest ++ " linearised Espresso returns 0") $
+                LatteIO.staticCode espLinOut `shouldBe` ExitSuccess
+            it (tstName latTest ++ " linearised Espresso output is correct") $
+                normaliseOut (LatteIO.staticOut espLinOut) `shouldBe` normaliseOut (tstOut latTest)
             it (tstName latTest ++ " unfolded phis Espresso returns 0") $
                 LatteIO.staticCode espPhiOut `shouldBe` ExitSuccess
             it (tstName latTest ++ " unfolded phis Espresso output is correct") $
                 normaliseOut (LatteIO.staticOut espPhiOut) `shouldBe` normaliseOut (tstOut latTest)
+            it (tstName latTest ++ " unfolded phis Espresso returns 0") $
+                LatteIO.staticCode espOptOut `shouldBe` ExitSuccess
+            it (tstName latTest ++ " unfolded phis Espresso output is correct") $
+                normaliseOut (LatteIO.staticOut espOptOut) `shouldBe` normaliseOut (tstOut latTest)
             it (tstName latTest ++ " x86_64 output is nonempty") $
                 null asm `shouldBe` False
         Right _ -> Prelude.error "impossible"
@@ -152,7 +163,10 @@ coreGoodDir :: FilePath
 coreGoodDir = testRootDir </> "good"
 
 arraysGoodDir :: FilePath
-arraysGoodDir = testRootDir </> "extensions" </> "arrays1"
+arraysGoodDir = testRootDir </> "extensions" </> "arrays1" </> "good"
+
+arraysBadDir :: FilePath
+arraysBadDir = testRootDir </> "extensions"</> "arrays1" </> "bad"
 
 objects1GoodDir :: FilePath
 objects1GoodDir = testRootDir </> "extensions" </> "objects1" </> "good"

@@ -9,6 +9,9 @@ import           System.Process
 import           Test.Hspec
 import           Utilities
 
+data ExecTestSet = TestSet {setName :: String, setTests :: [ExecTest]}
+data ExecTest = Test {testName :: String, testPath :: FilePath}
+
 -- If True, the workdir is removed after execution ends.
 -- Set to False to inspect the compiler output when tests fail.
 cleanupEnabled :: Bool
@@ -16,13 +19,13 @@ cleanupEnabled = True
 
 main :: IO ()
 main = do
-    testPaths <- getTestFilesWithoutExtensions
-    prepareTests testPaths
-    hspec $ runTests $ map takeFileName testPaths
+    sets <- testSets
+    prepareTests $ concatMap (map testPath . setTests) sets
+    hspec $ runTests sets
 
-runTests :: [FilePath] -> Spec
-runTests tests = do
-    parallel $ describe "Core" $ forM_ tests runTest
+runTests :: [ExecTestSet] -> Spec
+runTests sets = do
+    parallel $ forM_ sets (\s -> describe (setName s) $ forM_ (map testName (setTests s)) runTest)
     runIO cleanup
 
 runTest :: FilePath -> Spec
@@ -48,9 +51,9 @@ runTest test = do
 prepareTests :: [FilePath] -> IO ()
 prepareTests tests = do
     makeExitCode <- runPrtCommand "make" >>= waitForProcess
-    unless (makeExitCode == ExitSuccess) (failCmd "make" makeExitCode)
+    unless (makeExitCode == ExitSuccess) (putStr "make failed with exit code " >> print makeExitCode >> exitFailure)
     mkdirExitCode <- runPrtCommand ("mkdir " ++ workDirectory) >>= waitForProcess
-    unless (mkdirExitCode == ExitSuccess) (failCmd "mkdir" mkdirExitCode)
+    unless (mkdirExitCode == ExitSuccess) (putStr "mkdir failed with exit code " >> print mkdirExitCode >> exitFailure)
     forM_ tests copyTestToWorkdir
     where copyTestToWorkdir fp = do
                 let latFile = fp <.> latExtension
@@ -82,12 +85,30 @@ cleanup = when cleanupEnabled (do
 normaliseOut :: String -> String
 normaliseOut s = dropWhile isSpace $ reverse $ dropWhile isSpace $ reverse s
 
-getTestFilesWithoutExtensions :: IO [FilePath]
-getTestFilesWithoutExtensions = do
-    files <- listDirectory coreTestsDirectory
+-- TODO: Arrays
+testSets :: IO [ExecTestSet]
+testSets = sequence [coreTestSet, structTestSet]
+
+coreTestSet :: IO ExecTestSet
+coreTestSet = getTestSet coreTestsDirectory "Core"
+
+arrayTestSet :: IO ExecTestSet
+arrayTestSet = getTestSet arrayTestDirectory "Array"
+
+structTestSet :: IO ExecTestSet
+structTestSet = getTestSet structTestDirectory "Struct"
+
+getTestSet :: FilePath -> String -> IO ExecTestSet
+getTestSet dir name = do
+    tests <- getTestsFromDir dir
+    return $ TestSet name tests
+
+getTestsFromDir :: FilePath -> IO [ExecTest]
+getTestsFromDir dir =  do
+    files <- listDirectory dir
     let lats = filter (\f -> takeExtension f == latExtension) files
         tests = map dropExtension lats
-    return $ map (coreTestsDirectory </>) (dedup tests)
+    return $ map (\t -> Test (takeFileName t) (dir </> t)) (dedup tests)
 
 compilerPath :: FilePath
 compilerPath = "." </> "latc_x86_64"
@@ -97,6 +118,12 @@ testDirectoryRoot = "." </> "test" </> "lattests"
 
 coreTestsDirectory :: FilePath
 coreTestsDirectory = testDirectoryRoot </> "good"
+
+structTestDirectory :: FilePath
+structTestDirectory = testDirectoryRoot </> "extensions" </> "struct"
+
+arrayTestDirectory :: FilePath
+arrayTestDirectory = testDirectoryRoot </> "extensions" </> "arrays1" </> "good"
 
 workDirectory :: FilePath
 workDirectory = "." </> "test" </> "x86_64Spec_workdir"

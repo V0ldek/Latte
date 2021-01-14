@@ -1,5 +1,6 @@
 -- Generator monad used in Espresso codegen.
 module Espresso.CodeGen.GenM (
+      askClass,
       askSym,
       emit,
       freshLabel,
@@ -8,6 +9,7 @@ module Espresso.CodeGen.GenM (
       getCode,
       localSyms,
       runGen,
+      toVVal,
       valIdentFor,
       GenM,
       EspVal(..)
@@ -16,10 +18,12 @@ module Espresso.CodeGen.GenM (
 import           Control.Monad.Identity
 import           Control.Monad.Reader
 import           Control.Monad.State
-import qualified Data.Map               as Map
-import           Espresso.Syntax.Abs
-import           Identifiers            (indexedValIdent, labIdent, valIdent)
-import qualified Syntax.Abs             as Latte
+import qualified Data.Map                  as Map
+import           Espresso.Syntax.Abs       hiding (Metadata (..))
+import           Identifiers               (indexedValIdent, labIdent, valIdent)
+import           SemanticAnalysis.Class
+import           SemanticAnalysis.TopLevel
+import qualified Syntax.Abs                as Latte
 
 -- State of the generator.
 data Store = St {
@@ -33,14 +37,23 @@ data Store = St {
     stCode     :: [Instr ()]
 }
 -- Immutable environment mapping Latte variable names to generated values.
-newtype Env = Env {
-    envSymbols :: Map.Map Latte.Ident EspVal
+data Env = Env {
+    envSymbols  :: Map.Map Latte.Ident EspVal,
+    envMetadata :: Metadata ()
 }
 
 -- Espresso value.
-data EspVal = EspVal {valName :: ValIdent, valType :: SType ()}
+data EspVal = EspVal {valName :: ValIdent, valType_ :: SType ()}
 
 type GenM = StateT Store (Reader Env)
+
+-- Get the class metadata under a given identifier.
+askClass :: SymIdent -> GenM (Class ())
+askClass (SymIdent i) = do
+    mbcl <- asks ((\(Meta m) -> Map.lookup (Latte.Ident i) m) . envMetadata)
+    case mbcl of
+        Just cl -> return cl
+        Nothing -> error $ "internal error. class not found: " ++ i
 
 -- Get the scoped Espresso value for a given Latte variable identifier.
 askSym :: Latte.Ident -> GenM EspVal
@@ -78,8 +91,8 @@ localSyms :: [(Latte.Ident, EspVal)] -> GenM a -> GenM a
 localSyms syms = local (\e -> e {envSymbols = Map.union (Map.fromList syms) (envSymbols e)})
 
 -- Run the generator starting from an empty initial state.
-runGen :: GenM a -> a
-runGen gen = runIdentity $ runReaderT (evalStateT gen $ St 0 0 Map.empty []) (Env Map.empty)
+runGen :: Metadata a -> GenM b -> b
+runGen meta gen = runIdentity $ runReaderT (evalStateT gen $ St 0 0 Map.empty []) (Env Map.empty (() <$ meta))
 
 -- Get a fresh value with name signifying the identifier of the associated symbol.
 valIdentFor :: Latte.Ident -> GenM ValIdent
@@ -106,3 +119,6 @@ freshValIdx = do
     n <- gets stValCnt
     modify (\s -> s {stValCnt = n + 1})
     return n
+
+toVVal :: EspVal -> Val ()
+toVVal (EspVal i t) = VVal () t i

@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 -- Analyser of toplevel definitions generating class and function metadata.
 module SemanticAnalysis.TopLevel (programMetadata, Metadata(..)) where
 
@@ -11,7 +12,7 @@ import           SemanticAnalysis.Class
 import           Syntax.Abs
 import           Syntax.Code
 
-newtype Metadata a = Meta (Map.Map Ident (Class a))
+newtype Metadata a = Meta (Map.Map Ident (Class a)) deriving Functor
 
 -- Analyse the top level definitions in a program and produce its metadata.
 programMetadata :: Program Code -> Either String (Metadata Code)

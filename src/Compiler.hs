@@ -1,32 +1,37 @@
 module Compiler where
 
-import           Control.Monad                 (when)
-import           Data.Bifunctor                (Bifunctor (first))
-import qualified Data.Map                      as Map
-import           ErrM                          (toEither)
-import           Espresso.CodeGen.Generator    (generateEspresso)
+import           Control.Monad                      (when)
+import           Data.Bifunctor                     (Bifunctor (first))
+import qualified Data.Map                           as Map
+import           ErrM                               (toEither)
+import           Espresso.CodeGen.Generator         (generateEspresso)
 import           Espresso.ControlFlow.CFG
-import           Espresso.ControlFlow.Liveness (Liveness, analyseLiveness,
-                                                emptyLiveness)
-import           Espresso.ControlFlow.Phi      (unfoldPhi)
-import qualified Espresso.Syntax.Abs           as Esp
-import           Espresso.Syntax.Printer       as PrintEsp (Print, printTree,
-                                                            printTreeWithInstrComments)
-import           Identifiers                   (ToString (toStr))
+import           Espresso.ControlFlow.Liveness      (Liveness, analyseLiveness,
+                                                     emptyLiveness)
+import           Espresso.ControlFlow.Phi           (unfoldPhi)
+import           Espresso.Optimisation.CFGTransform (inlineTrivialBlocks,
+                                                     removeUnreachable)
+import qualified Espresso.Syntax.Abs                as Esp
+import           Espresso.Syntax.Printer            as PrintEsp (Print,
+                                                                 printTree,
+                                                                 printTreeWithInstrComments)
+import           Identifiers                        (ToString (toStr))
 import           LatteIO
-import           SemanticAnalysis.Analyser     (SemData, analyse)
-import           SemanticAnalysis.TopLevel     (Metadata, programMetadata)
-import           Syntax.Abs                    as Latte (Pos, Program,
-                                                         unwrapPos)
-import           Syntax.Lexer                  (Token)
-import           Syntax.Parser                 (myLexer, pProgram)
-import           Syntax.Printer                as PrintLatte (Print, printTree)
-import           Syntax.Rewriter               (rewrite)
-import           System.FilePath               (dropExtension, takeDirectory,
-                                                takeFileName, (<.>), (</>))
-import           Utilities                     (unlessM)
-import           X86_64.CodeGen.Generator      (generate)
-import qualified X86_64.Optimisation.Peephole  as Peephole
+import           SemanticAnalysis.Analyser          (SemData, analyse)
+import           SemanticAnalysis.TopLevel          (Metadata, programMetadata)
+import           Syntax.Abs                         as Latte (Pos, Program,
+                                                              unwrapPos)
+import           Syntax.Lexer                       (Token)
+import           Syntax.Parser                      (myLexer, pProgram)
+import           Syntax.Printer                     as PrintLatte (Print,
+                                                                   printTree)
+import           Syntax.Rewriter                    (rewrite)
+import           System.FilePath                    (dropExtension,
+                                                     takeDirectory,
+                                                     takeFileName, (<.>), (</>))
+import           Utilities                          (unlessM)
+import           X86_64.CodeGen.Generator           (generate)
+import qualified X86_64.Optimisation.Peephole       as Peephole
 
 data Verbosity = Quiet | Verbose deriving (Eq, Ord, Show)
 
@@ -57,26 +62,31 @@ run opt = do
     latSrc <- LatteIO.readFile $ inputFile opt
     printStringV v "Analysing Latte..."
     latte <- analysePhase opt latSrc
-    printStringV v "Brewing Esp..."
+    printStringV v "Brewing Espresso..."
     let espresso@(Esp.Program a meta mthds) = generateEspresso latte
     genStep opt (espressoFile directory fileName) (PrintEsp.printTree espresso)
     printStringV v "Building CFGs..."
     let cfgs = zip (map cfg mthds) mthds
         espressoOpt = PrintEsp.printTree $ Esp.Program a meta (cfgsToMthds () cfgs)
     genStep opt (espressoCfgFile directory fileName) (showCfgs cfgs)
-    genStep opt (espressoOptFile directory fileName) espressoOpt
+    genStep opt (espressoWithoutDeadFile directory fileName) espressoOpt
     printStringV v "Unfolding phis..."
     let cfgsWithUnfoldedPhi = zip (map unfoldPhi cfgs) mthds
         espressoWithUnfoldedPhi = PrintEsp.printTree $ Esp.Program () meta (cfgsToMthds () cfgsWithUnfoldedPhi)
     genStep opt (espressoCfgWithUnfoldedPhiFile directory fileName) (showCfgs cfgsWithUnfoldedPhi)
     genStep opt (espressoWithUnfoldedPhiFile directory fileName) espressoWithUnfoldedPhi
+    printStringV v "Optimising Espresso..."
+    let optimisedCfgs = map (\(cfg_, mthd) -> removeUnreachable (inlineTrivialBlocks cfg_) mthd) cfgsWithUnfoldedPhi
+        optimisedEspresso = PrintEsp.printTree $ Esp.Program () meta (cfgsToMthds () optimisedCfgs)
+    genStep opt (espressoOptimisedCfgFile directory fileName) (showCfgs optimisedCfgs)
+    genStep opt (espressoOptimisedFile directory fileName) optimisedEspresso
     printStringV v "Analysing liveness..."
-    let cfgsWithLiveness = map (first analyseLiveness) cfgsWithUnfoldedPhi
+    let cfgsWithLiveness = map (first analyseLiveness) optimisedCfgs
         espressoWithLiveness = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgsWithLiveness)
     genStep opt (espressoCfgWithLivenessFile directory fileName) (showCfgsWithLiveness cfgsWithLiveness)
     genStep opt (espressoWithLivenessFile directory fileName) espressoWithLiveness
     printStringV v "Generating x86_64 assembly..."
-    let assembly = generate cfgsWithLiveness
+    let assembly = generate meta cfgsWithLiveness
     genStep opt (unoptAssemblyFile directory fileName) assembly
     let optAssembly = unlines $ Peephole.optimise (lines assembly)
     genOutput opt (assemblyFile directory fileName) optAssembly
@@ -184,8 +194,8 @@ espressoFile dir file = dir </> file <.> "esp"
 espressoCfgFile :: FilePath -> FilePath -> FilePath
 espressoCfgFile dir file = dir </> file <.> "cfg"
 
-espressoOptFile :: FilePath -> FilePath -> FilePath
-espressoOptFile dir file = dir </> file <.> "1" <.> "opt" <.> "esp"
+espressoWithoutDeadFile :: FilePath -> FilePath -> FilePath
+espressoWithoutDeadFile dir file = dir </> file <.> "1" <.> "lin" <.> "esp"
 
 espressoCfgWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
 espressoCfgWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "cfg"
@@ -193,8 +203,14 @@ espressoCfgWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "cf
 espressoWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
 espressoWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "esp"
 
+espressoOptimisedCfgFile :: FilePath -> FilePath -> FilePath
+espressoOptimisedCfgFile dir file = dir </> file <.> "3" <.> "opt" <.> "cfg"
+
+espressoOptimisedFile :: FilePath -> FilePath -> FilePath
+espressoOptimisedFile dir file = dir </> file <.> "3" <.> "opt" <.> "esp"
+
 espressoCfgWithLivenessFile :: FilePath -> FilePath -> FilePath
-espressoCfgWithLivenessFile dir file = dir </> file <.> "3" <.> "liv" <.> "cfg"
+espressoCfgWithLivenessFile dir file = dir </> file <.> "4" <.> "liv" <.> "cfg"
 
 espressoWithLivenessFile :: FilePath -> FilePath -> FilePath
-espressoWithLivenessFile dir file = dir </> file <.> "3" <.> "liv" <.> "esp"
+espressoWithLivenessFile dir file = dir </> file <.> "4" <.> "liv" <.> "esp"
