@@ -107,6 +107,7 @@ data Instr a
     | IStore a (Val a) (Val a)
     | IFld a ValIdent (Val a) (QIdent a)
     | IArr a ValIdent (Val a) (Val a)
+    | IArrLen a ValIdent (Val a)
     | IPhi a ValIdent [PhiVariant a]
   deriving (Eq, Ord, Show, Read, Foldable)
 
@@ -130,6 +131,7 @@ instance Functor Instr where
         IStore a val1 val2 -> IStore (f a) (fmap f val1) (fmap f val2)
         IFld a valident val qident -> IFld (f a) valident (fmap f val) (fmap f qident)
         IArr a valident val1 val2 -> IArr (f a) valident (fmap f val1) (fmap f val2)
+        IArrLen a valident val -> IArrLen (f a) valident (fmap f val)
         IPhi a valident phivariants -> IPhi (f a) valident (map (fmap f) phivariants)
 data PhiVariant a = PhiVar a LabIdent (Val a)
   deriving (Eq, Ord, Show, Read, Foldable)

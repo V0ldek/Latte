@@ -6,7 +6,7 @@ token SymIdent (letter | '~') (letter | digit | '_' | '\'')* ;
 token LabIdent '.' 'L' '_' (letter | digit | '_' | '\'')* ;
 
 -- Values are %v_x, arguments are %a_x.
-token ValIdent '%' ('v' | 'a') '_' (letter | digit | '_' | '\'')* ;
+token ValIdent '%' ('v' | 'a') '_' (letter | digit | '_' | '~' | '\'')* ;
 
 QIdent. QIdent ::= SymIdent "." SymIdent ;
 
@@ -60,6 +60,7 @@ ILoad.     Instr ::= ValIdent ":=" "load" Val ";" ;
 IStore.    Instr ::= "store" Val Val ";" ;
 IFld.      Instr ::= ValIdent ":=" "fldptr" Val QIdent ";" ;
 IArr.      Instr ::= ValIdent ":=" "elemptr" Val "[" Val "]" ";" ;
+IArrLen.   Instr ::= ValIdent ":=" "arrlen" Val ";" ;
 IPhi.      Instr ::= ValIdent ":=" "phi" "(" [PhiVariant] ")" ";" ;
 
 PhiVar. PhiVariant ::= LabIdent ":" Val ;

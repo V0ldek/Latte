@@ -25,7 +25,7 @@ type Store = Map.Map Loc Object
 data Env = Env { objEnv :: OEnv, clEnv :: CEnv, labelEnv :: LEnv }
 
 data Object = Inst { objType_ :: Class, objData_ :: OEnv }
-            | Array  { arrType_ :: SType (), arrData_ :: [Object]}
+            | Array  { arrType_ :: SType (), arrData_ :: [Loc], arrLength_ :: Int}
             | Ptr   { ref :: Loc }
             | PInt Int
             | PBool Bool
@@ -138,8 +138,8 @@ execute prevLabel currLabel (instr : is) ret = case instr of
         size <- getVal val
         case size of
             PInt n -> do
-                let objs = replicate n (defaultValue t)
-                    arr = Array (() <$ t) objs
+                locs <- replicateM n (allocDefault t)
+                let arr = Array (() <$ t) locs n
                 newval <- store (toStr i) arr
                 localObj newval $ execute prevLabel currLabel is ret
             _ -> Prelude.error $ "internal error. invalid type of size of array " ++ show size
@@ -174,7 +174,25 @@ execute prevLabel currLabel (instr : is) ret = case instr of
                     localObj newval $ execute prevLabel currLabel is ret
                 Nothing  -> LatteIO.error $ "internal error. nonexistent field " ++ fldI
             _ -> LatteIO.error $ "internal error. fldptr called on noninstance " ++ show obj
-    IArr {} -> LatteIO.error "arrays unimplemented"
+    IArr _ i arrV idxV -> do
+        arr <- getVal arrV
+        idx <- getVal idxV
+        case (arr, idx) of
+            (Array _ data_ len, PInt n) ->
+                if len <= n
+                  then LatteIO.error $ "internal error. arrptr index overflow " ++ show n ++ " >= " ++ show len
+                  else do
+                    let loc = data_ !! n
+                    newval <- store (toStr i) (Ptr loc)
+                    localObj newval $ execute prevLabel currLabel is ret
+            _ -> LatteIO.error $ "internal error. invalid types in arrptr " ++ show arr ++ ", " ++ show idx
+    IArrLen _ i v -> do
+        x <- getVal v
+        case x of
+            Array _ _ len -> do
+                newval <- store (toStr i) (PInt len)
+                localObj newval $ execute prevLabel currLabel is ret
+            _ -> LatteIO.error $ "internal error. invalid type in arrlen " ++ show x
     IPhi _ i variants -> do
         let Just (PhiVar _ _ val) = find (\(PhiVar _ l _) -> toStr l == prevLabel) variants
         obj <- getVal val
@@ -364,13 +382,13 @@ runNative i vals ret = case i of
 
 instance Show Object where
     show o = case o of
-        Inst t _  -> clName t
-        Array t d -> show t ++ "[" ++ show (length d) ++ "]"
-        Ptr t     -> "&" ++ show t
-        PInt _    -> "int"
-        PBool _   -> "bool"
-        PStr _    -> "string"
-        PNull     -> "null"
+        Inst t _    -> clName t
+        Array t _ l -> show t ++ "[" ++ show l ++ "]"
+        Ptr t       -> "&" ++ show t
+        PInt _      -> "int"
+        PBool _     -> "bool"
+        PStr _      -> "string"
+        PNull       -> "null"
 
 instance (Monad m, LatteIO m) => LatteIO (InterpreterM m) where
     readInt = lift $ lift readInt

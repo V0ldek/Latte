@@ -81,11 +81,46 @@ void *lat_new_instance(size_t size)
 {
     if (size == 0)
     {
-        TERMINATE("Invalid instance size 0");
+        TERMINATE("internal error. invalid instance size 0");
     }
 
     void *result = calloc(1, size);
     CHK_SYSERR_VAL(result, NULL, "calloc")
+
+    return result;
+}
+
+void *lat_new_array(int32_t count, size_t size)
+{
+    if (size == 0)
+    {
+        TERMINATE("internal error. invalid instance size 0");
+    }
+    if (count <= 0)
+    {
+        TERMINATE("runtime error. non-positive array size.\n");
+    }
+
+    void *result;
+
+    if (size < 4)
+    {
+        if (4 % size != 0)
+        {
+            TERMINATE("internal error. element size does not divide 4");
+        }
+
+        size_t length_field_count = 4 / size;
+        result = calloc(count + length_field_count, size);
+    }
+    else
+    {
+        result = calloc(count + 1, size);
+    }
+
+    CHK_SYSERR_VAL(result, NULL, "calloc")
+    int32_t *length_field = result;
+    *length_field = count;
 
     return result;
 }

@@ -116,7 +116,7 @@ genInstr instr =
                 resetStack
                 endBlock
             IOp _ vi v1 op v2 -> case op of
-                OpAdd _ | isInt (valType v1) -> emitSimpleBin Emit.add vi v1 v2
+                OpAdd _ | isInt (valType v1) -> emitSimpleBin (\l1 l2 -> Emit.add l1 l2 "") vi v1 v2
                 OpAdd _ | isStr (valType v1) -> do
                     genCall "lat_cat_strings" [v1, v2]
                     newVar vi (Ref () (Str ()))
@@ -280,6 +280,11 @@ genInstr instr =
                     newVar vi (Ref () (() <$ t))
                     saveInReg vi rax
                 _ -> error $ "internal error. new on nonclass " ++ show t
+            INewArr _ vi t val -> do
+                let sizeArg = VInt () (toInteger $ sizeInBytes $ typeSize t)
+                genCall "lat_new_array" [() <$ val, sizeArg]
+                newVar vi (Ref () $ Arr () $ () <$ t)
+                saveInReg vi rax
             IJmp _ li -> do
                 li' <- label li
                 resetStack
@@ -315,8 +320,34 @@ genInstr instr =
                         forM_ locs (saveInLoc vi)
                         useVal val
                     Nothing -> error $ "internal error. no such field " ++ toStr cli ++ "." ++ toStr fldi
+            IArr _ vi v1 v2 -> do
+                let t = valType v1
+                case deref t of
+                    Arr _ elemT -> do
+                        let elemSize = typeSize elemT
+                            idxOffset = if elemSize < Double
+                                          then sizeInBytes Double `div` sizeInBytes elemSize
+                                          else 1
+                        arrReg <- moveToAnyReg v1
+                        reserveReg arrReg
+                        idxReg <- moveToAnyReg v2
+                        unreserveReg arrReg
+                        useVal v1
+                        useVal v2
+                        freeReg idxReg
+                        Emit.add (LocImm64 idxOffset) (LocReg idxReg) "offset the array length field"
+                        Emit.lea arrReg 0 idxReg elemSize (LocReg idxReg) ("address of " ++ toStr vi)
+                        newVarPtr vi (Ref () $ () <$ elemT) 0
+                        saveInReg vi idxReg
+                    _ -> error $ "internal error. invalid type in IArr " ++ show t
+            IArrLen _ vi val -> do
+                reg_ <- moveToAnyReg val
+                freeReg reg_
+                useVal val
+                Emit.movFromMemToReg Double reg_ 0 reg_ ("load array length " ++ toStr vi)
+                newVar vi (Int ())
+                saveInReg vi reg_
             IPhi {} -> error "internal error. phi should be eliminated before assembly codegen"
-            _ -> error $ "unimplemented " ++ show instr
         fullTrace
         return ()
     )

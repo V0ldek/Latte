@@ -23,6 +23,11 @@ isInt t = case deref t of
     Int _ -> True
     _     -> False
 
+isRef :: SType a -> Bool
+isRef t = case t of
+    Ref {} -> True
+    _      -> False
+
 isStr :: SType a -> Bool
 isStr t = case deref t of
     Str _ -> True

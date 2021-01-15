@@ -85,9 +85,8 @@ cleanup = when cleanupEnabled (do
 normaliseOut :: String -> String
 normaliseOut s = dropWhile isSpace $ reverse $ dropWhile isSpace $ reverse s
 
--- TODO: Arrays
 testSets :: IO [ExecTestSet]
-testSets = sequence [coreTestSet, structTestSet]
+testSets = sequence [coreTestSet, structTestSet, arrayTestSet]
 
 coreTestSet :: IO ExecTestSet
 coreTestSet = getTestSet coreTestsDirectory "Core"

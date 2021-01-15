@@ -24,7 +24,7 @@ data LatTest = LatTest {
 data LatResult = Res Int [String] deriving (Eq, Show, Ord)
 
 skip :: [String]
-skip = []
+skip = ["primes"]
 
 spec :: Spec
 spec = parallel $ do
@@ -37,7 +37,7 @@ spec = parallel $ do
     describe "Extension struct good" $ do
         tests <- runIO $ getLatTestsFromDir structGoodDir
         mapM_ goodTest tests
-    dont $ describe "Extension arrays good" $ do
+    describe "Extension arrays good" $ do
         tests <- runIO $ getLatTestsFromDir arraysGoodDir
         mapM_ goodTest tests
     describe "Extension arrays bad" $ do

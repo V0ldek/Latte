@@ -19,8 +19,9 @@ module X86_64.CodeGen.Emit (
     jmp,
     jz,
     label,
-    leave,
+    lea,
     leaOfConst,
+    leave,
     movFromMemToReg,
     movFromRegToMem,
     movToReg,
@@ -65,16 +66,16 @@ emitAsString f = let PE s = f in s
 
 -- Emit an addition operation between a source and destination location.
 -- Saves the result in the destination.
---   add<s> <src>, <dest>
+--   add<s> <src>, <dest> # <comment>
 -- where <s> is the AT&T instruction suffix based on <size>.
-add :: EmitM m => Loc -> Loc -> m ()
-add src dest =
+add :: EmitM m => Loc -> Loc -> String -> m ()
+add src dest comment_ =
     let srcString = loc Double src
         destString = loc Double dest
     in case (src, dest) of
         (_, LocImm _) -> error "internal error. add to immediate"
         (LocStack _, LocStack _) -> error "internal error. add from stack to stack"
-        _ -> emitInd $ bin "add" Double srcString destString ""
+        _ -> emitInd $ bin "add" Double srcString destString comment_
 
 -- Emit an and operation between a source and destination location.
 -- Saves the result in the destination.
@@ -177,6 +178,11 @@ jz (LabIdent l) = emitInd $ "jz " ++ sanitiseAssembly l
 -- <l>: # <comment>
 label :: EmitM m => LabIdent -> String -> m ()
 label (LabIdent l) comment_ = emit $ sanitiseAssembly l ++ ":" ++ comment comment_
+
+
+lea :: EmitM m => Reg -> Int64 -> Reg -> Size -> Loc -> String -> m ()
+lea baseReg offset idxReg scale dest comment_ =
+    emitInd $ "lea " ++ complexPtr baseReg offset idxReg scale ++ ", " ++ loc Quadruple dest ++ comment comment_
 
 -- Emit an address load operation for a compile-time string constant.
 --   lea <constName c>(%rip), %<reg>
@@ -347,6 +353,13 @@ comment s  = ' ':'#':' ':s
 
 commentMultiline :: EmitM m => [String] -> m ()
 commentMultiline = emit . unlines . map comment
+
+complexPtr :: Reg -> Int64 -> Reg -> Size -> String
+complexPtr baseReg offset idxReg scale =
+    show offset ++ "("
+        ++ sizedReg Quadruple baseReg ++ ","
+        ++ sizedReg Quadruple idxReg ++ ","
+        ++ show (sizeInBytes scale) ++ ")"
 
 -- Emit an instruction indented by 2 spaces.
 emitInd :: EmitM m => String -> m ()

@@ -236,13 +236,22 @@ genExpr expr = case expr of
         newval <- freshVal
         emit $ ICall () newval (Call () (toSType t) fun vals)
         return (VVal () (toSType t) newval)
-    Latte.EIdx {}           -> error "arrays unimplemented"
+    Latte.EIdx _ arrExpr idxExpr -> do
+        objPtr <- genArrAcc arrExpr idxExpr
+        let t = deref $ valType_ objPtr
+        newval <- freshVal
+        emit $ ILoad () newval (toVVal objPtr)
+        return (VVal () t newval)
     Latte.EAcc _ e fldIdent -> do
         fldPtr <- genFldAcc e fldIdent
         let t = deref $ valType_ fldPtr
-        newval <- freshVal
-        emit $ ILoad () newval (toVVal fldPtr)
-        return (VVal () t newval)
+        if isRef $ valType_ fldPtr
+          then do
+            newval <- freshVal
+            emit $ ILoad () newval (toVVal fldPtr)
+            return (VVal () t newval)
+          else
+            return $ toVVal fldPtr
     Latte.ENeg _ e          -> genUnOp e (UnOpNeg ())
     Latte.ENot _ e          -> genUnOp e (UnOpNot ())
     Latte.EMul _ e1 op e2   -> genOp e1 e2 (toEspressoMulOp op)
@@ -416,7 +425,9 @@ genLValue e = case e of
     Latte.EVar _ i -> do
         val <- askSym i
         return (val, VLocal)
-    Latte.EIdx {} -> error "arrays unimplemented"
+    Latte.EIdx _ arrExpr idxExpr -> do
+        arrptr <- genArrAcc arrExpr idxExpr
+        return (arrptr, VIndirect)
     Latte.EAcc _ objExpr fldIdent -> do
         fld <- genFldAcc objExpr fldIdent
         return (fld, VIndirect)
@@ -436,7 +447,25 @@ genFldAcc e i = do
                     emit $ IFld () newval obj (QIdent () clIdent (toSymIdent $ fldName fld))
                     return $ EspVal newval (Ref () $ toSType $ fldType fld)
                 Nothing -> error $ "internal error. invalid field " ++ Latte.showI i ++ " for type " ++ toStr clIdent
+        Arr {} -> case i of
+            Latte.Ident "length" -> do
+                newval <- freshVal
+                emit $ IArrLen () newval obj
+                return $ EspVal newval (Int ())
+            _ -> error $ "internal error. invalid array field access " ++ Latte.showI i
         _ -> error $ "internal error. invalid type in fldAcc " ++ show (() <$ t)
+
+genArrAcc :: Latte.Expr SemData -> Latte.Expr SemData -> GenM EspVal
+genArrAcc arrExpr idxExpr = do
+    arrObj <- genExpr arrExpr
+    idxObj <- genExpr idxExpr
+    let t = valType arrObj
+    case deref t of
+        Arr _ elemT -> do
+            newval <- freshVal
+            emit $ IArr () newval arrObj idxObj
+            return $ EspVal newval (Ref () elemT)
+        _ -> error $ "internal error. invalid type in arrAcc " ++ show (() <$ t)
 
 genFun :: Latte.Expr SemData -> GenM (QIdent ())
 genFun e = case e of
