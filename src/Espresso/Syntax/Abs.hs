@@ -59,7 +59,6 @@ instance Functor FType where
         FType a stype stypes -> FType (f a) (fmap f stype) (map (fmap f) stypes)
 data SType a
     = Int a
-    | Str a
     | Bool a
     | Void a
     | Arr a (SType a)
@@ -70,7 +69,6 @@ data SType a
 instance Functor SType where
     fmap f x = case x of
         Int a         -> Int (f a)
-        Str a         -> Str (f a)
         Bool a        -> Bool (f a)
         Void a        -> Void (f a)
         Arr a stype   -> Arr (f a) (fmap f stype)

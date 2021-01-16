@@ -149,7 +149,6 @@ instance Print (FType a) where
 instance Print (SType a) where
   prt i e = case e of
     Int _ -> prPrec i 0 (concatD [doc (showString "int")])
-    Str _ -> prPrec i 0 (concatD [doc (showString "string")])
     Bool _ -> prPrec i 0 (concatD [doc (showString "boolean")])
     Void _ -> prPrec i 0 (concatD [doc (showString "void")])
     Arr _ stype -> prPrec i 0 (concatD [prt 0 stype, doc (showString "[]")])

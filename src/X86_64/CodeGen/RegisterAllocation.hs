@@ -219,7 +219,7 @@ moveConstToAnyReg :: Const -> GenM Reg
 moveConstToAnyReg c = do
     reg_ <- chooseReg
     freeReg reg_
-    Emit.leaOfConst c reg_
+    Emit.leaOfConst (constName c) reg_
     return reg_
 
 -- Move the value to any unreserved register if it is not already

@@ -26,7 +26,7 @@ topDefsMetadata ts = do
     functions <- fnDefsMetadata fnDefs
     topLevelClass <- clCons topLevelClassIdent Nothing [] functions
     classes <- clDefsMetadata clDefs
-    let allClasses = topLevelClass : rootCl : classes
+    let allClasses = topLevelClass : rootCl : stringCl : classes
         clIdents = map clName allClasses
         classMap = Map.fromList (zip clIdents allClasses)
     return $ Meta classMap

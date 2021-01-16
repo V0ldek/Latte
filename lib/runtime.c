@@ -79,9 +79,9 @@ const lat_string *lat_new_string(const char *str, size_t len)
 
 void *lat_new_instance(size_t size)
 {
-    if (size == 0)
+    if (size < 8)
     {
-        TERMINATE("internal error. invalid instance size 0");
+        TERMINATE("internal error. invalid instance size %ld, must be at least 8 to hold the vtable pointer", size);
     }
 
     void *result = calloc(1, size);
@@ -147,11 +147,16 @@ void lat_error()
     TERMINATE("runtime error\n");
 }
 
+void lat_nullref() 
+{ 
+    TERMINATE("runtime error. attempt to dereference a null.\n");
+}
+
 void lat_nullchk(const void *ptr)
 {
     if (ptr == NULL)
     {
-        TERMINATE("runtime error. attempt to dereference a null.\n");
+        lat_nullref();
     }
 }
 

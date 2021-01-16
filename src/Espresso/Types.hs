@@ -8,7 +8,6 @@ defaultVal :: SType a -> Val ()
 defaultVal t = case deref t of
     Int _   -> VInt () 0
     Bool _  -> VFalse ()
-    Str _   -> VNull () (() <$ t)
     Cl _ _  -> VNull () (() <$ t)
     Arr _ _ -> VNull () (() <$ t)
     _       -> error $ "defaultVal: invalid type " ++ show (() <$ t)
@@ -29,14 +28,14 @@ isRef t = case t of
     _      -> False
 
 isStr :: SType a -> Bool
-isStr t = case deref t of
-    Str _ -> True
-    _     -> False
+isStr t = (() <$ deref t) == strType
+
+strType :: SType ()
+strType = Cl () (SymIdent "string")
 
 toSType :: Latte.Type a -> SType a
 toSType t = case t of
     Latte.Int a                -> Int a
-    Latte.Str a                -> Ref a (Str a)
     Latte.Bool a               -> Bool a
     Latte.Void a               -> Void a
     Latte.Var {}               -> error "toSType: not a simple type 'var'"

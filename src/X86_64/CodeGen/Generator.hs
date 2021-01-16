@@ -7,6 +7,7 @@ module  X86_64.CodeGen.Generator (generate) where
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Data.Bifunctor                    (Bifunctor (second))
+import           Data.Int
 import           Data.List                         (partition)
 import qualified Data.Map                          as Map
 import qualified Data.Set                          as Set
@@ -14,7 +15,7 @@ import           Espresso.ControlFlow.CFG          (CFG (..), Node (..))
 import           Espresso.ControlFlow.Liveness
 import           Espresso.Syntax.Abs
 import           Espresso.Types                    (deref, isInt, isStr,
-                                                    valType)
+                                                    valType, strType)
 import           Identifiers
 import           Utilities                         (isPowerOfTwo, log2, single)
 import           X86_64.Class
@@ -118,8 +119,8 @@ genInstr instr =
             IOp _ vi v1 op v2 -> case op of
                 OpAdd _ | isInt (valType v1) -> emitSimpleBin (\l1 l2 -> Emit.add l1 l2 "") vi v1 v2
                 OpAdd _ | isStr (valType v1) -> do
-                    genCall "lat_cat_strings" [v1, v2]
-                    newVar vi (Ref () (Str ()))
+                    genCall (CallDirect "lat_cat_strings") [v1, v2]
+                    newVar vi (Ref () strType)
                     saveInReg vi rax
                     useVal v1
                     useVal v2
@@ -193,12 +194,12 @@ genInstr instr =
                 useVal v
             IStr _ vi str -> do
                 let len = toInteger $ length str
-                    t = Ref () (Str ())
+                    t = Ref () $ strType
                 strConst <- newStrConst str
                 reg_ <- moveConstToAnyReg strConst
                 newVar vi t
                 saveInReg vi reg_
-                genCall "lat_new_string" [VVal () t vi, VInt () len]
+                genCall (CallDirect "lat_new_string") [VVal () t vi, VInt () len]
                 newVar vi t
                 saveInReg vi rax
             IUnOp _ vi op v -> case op of
@@ -237,12 +238,12 @@ genInstr instr =
                                 VFalse _ -> setLoc (LocImm 1) varS
                                 _ -> error "internal error. invalid operand to UnOpNot"
             IVCall _ call -> case call of
-                    Call _ _ qi args -> genCall (getCallTarget qi) args
-                    CallVirt {}      -> error "callvirt unimplemented"
+                    Call _ _ qi args     -> genCall (CallDirect $ getCallTarget qi) args
+                    CallVirt _ _ qi args -> genCallVirt qi args
             ICall _ vi call -> do
                 t <- case call of
-                        Call _ t' qi args -> genCall (getCallTarget qi) args >> return t'
-                        CallVirt {}       -> error "callvirt unimplemented"
+                        Call _ t' qi args     -> genCall (CallDirect $ getCallTarget qi) args >> return t'
+                        CallVirt _ t' qi args -> genCallVirt qi args >> return t'
                 newVar vi (() <$ t)
                 saveInReg vi rax
             ILoad _ vi val -> do
@@ -276,13 +277,16 @@ genInstr instr =
                 Cl _ clIdent -> do
                     cl <- getClass clIdent
                     let sizeArg = VInt () (toInteger $ clSize cl)
-                    genCall "lat_new_instance" [sizeArg]
+                    genCall (CallDirect "lat_new_instance") [sizeArg]
                     newVar vi (Ref () (() <$ t))
                     saveInReg vi rax
+                    let (LocReg reg_) = argLoc 0
+                    Emit.leaOfConst (toStr $ vTableLabIdent clIdent) reg_
+                    Emit.movFromRegToMem Quadruple reg_ rax 0
                 _ -> error $ "internal error. new on nonclass " ++ show t
             INewArr _ vi t val -> do
                 let sizeArg = VInt () (toInteger $ sizeInBytes $ typeSize t)
-                genCall "lat_new_array" [() <$ val, sizeArg]
+                genCall (CallDirect "lat_new_array") [() <$ val, sizeArg]
                 newVar vi (Ref () $ Arr () $ () <$ t)
                 saveInReg vi rax
             IJmp _ li -> do
@@ -306,7 +310,7 @@ genInstr instr =
                         endBlock
                         Emit.jmp l1'
                     _ -> do
-                        Emit.test loc loc
+                        Emit.test Byte loc loc
                         saveBetweenBlocks
                         endBlock
                         Emit.jz l2'
@@ -352,7 +356,9 @@ genInstr instr =
         return ()
     )
 
-genCall :: String -> [Val a] -> GenM ()
+data CallTarget = CallDirect String | CallAddress Reg Int64 String
+
+genCall :: CallTarget -> [Val a] -> GenM ()
 genCall target args = do
         let argsWithLocs = zip args (map argLoc [0..])
             (argsWithLocReg,  argsWithLocStack) = partition (isReg . snd) argsWithLocs
@@ -368,7 +374,9 @@ genCall target args = do
         alignStack
         stackAfter <- gets (stackOverheadSize . stack)
         forM_ locs (`Emit.push` "passing arg")
-        Emit.call target
+        case target of
+            CallDirect l              -> Emit.callDirect l
+            CallAddress reg_ offset s -> Emit.callAddress reg_ offset ("call " ++ s)
         Emit.decrStack (stackAfter - stackBefore)
         modify (\st -> st{stack = (stack st){stackOverheadSize = stackBefore}})
     where passInReg val reg_ = moveToReg val reg_ >> useVal val
@@ -383,6 +391,23 @@ genCall target args = do
               (misalignment, s) <- gets (stackAlign16 . stack)
               Emit.incrStack misalignment "16 bytes alignment"
               setStack s
+
+genCallVirt :: QIdent a -> [Val a] -> GenM ()
+genCallVirt _ [] = error "internal error. callvirt with no args"
+genCallVirt (QIdent _ cli i) args@(self:_) = do
+    cl <- getClass cli
+    let LocReg reg_ = argLoc 0
+        offset = case Map.lookup i $ vtabMthds $ clVTable cl of
+                    Just (_, n) -> n
+                    Nothing     -> error ""
+    moveToReg self reg_
+    Emit.test Quadruple (LocReg reg_) (LocReg reg_)
+    Emit.jz nullrefLabel
+    freeReg rax
+    reserveReg rax
+    Emit.movFromMemToReg Quadruple reg_ 0 rax "load address of vtable"
+    genCall (CallAddress rax offset (toStr i)) args
+    unreserveReg rax
 
 emitSimpleBin :: (Loc -> Loc -> GenM ()) -> ValIdent -> Val a -> Val a -> GenM ()
 emitSimpleBin emitter vi v1 v2 = do

@@ -5,7 +5,8 @@ module X86_64.CodeGen.Emit (
     emitAsString,
     add,
     and,
-    call,
+    callAddress,
+    callDirect,
     cdq,
     cmp,
     commentMultiline,
@@ -22,6 +23,7 @@ module X86_64.CodeGen.Emit (
     lea,
     leaOfConst,
     leave,
+    movConst,
     movFromMemToReg,
     movFromRegToMem,
     movToReg,
@@ -29,6 +31,7 @@ module X86_64.CodeGen.Emit (
     neg,
     pop,
     push,
+    quadDef,
     ret,
     sal,
     sar,
@@ -90,10 +93,16 @@ and size src dest comment_ =
         (LocStack _, LocStack _) -> error "internal error. and from stack to stack"
         _ -> emitInd $ bin "and" size srcString destString comment_
 
--- Emit a call instruction.
+-- Emit a call instruction to the address in the given memory location.
+--   call *<offset>(%<reg>) # <comment>
+callAddress :: EmitM m => Reg -> Int64 -> String -> m ()
+callAddress reg_ offset comment_ =
+    emitInd $ "call *" ++ show offset ++ "(" ++ sizedReg Quadruple reg_ ++ ")" ++ comment comment_
+
+-- Emit a call instruction to a label.
 --   call <f>
-call :: EmitM m => String -> m ()
-call f = emitInd $ "call " ++ sanitiseAssembly f
+callDirect :: EmitM m => String -> m ()
+callDirect f = emitInd $ "call " ++ sanitiseAssembly f
 
 -- Emit a sign-extend instruction for division purposes, see idiv.
 -- Loads the sign of eax into edx.
@@ -184,17 +193,22 @@ lea :: EmitM m => Reg -> Int64 -> Reg -> Size -> Loc -> String -> m ()
 lea baseReg offset idxReg scale dest comment_ =
     emitInd $ "lea " ++ complexPtr baseReg offset idxReg scale ++ ", " ++ loc Quadruple dest ++ comment comment_
 
--- Emit an address load operation for a compile-time string constant.
---   lea <constName c>(%rip), %<reg>
+-- Emit an address load operation for a compile-time constant.
+--   lea <x>(%rip), %<reg>
 -- where <s> is the AT&T instruction suffix based on <size>.
-leaOfConst :: EmitM m => Const -> Reg -> m ()
-leaOfConst c dest =
-    emitInd $ "lea " ++ constName c ++ "(%rip), " ++ reg (reg64 dest)
+leaOfConst :: EmitM m => String -> Reg -> m ()
+leaOfConst x dest =
+    emitInd $ "lea " ++ sanitiseAssembly x ++ "(%rip), " ++ reg (reg64 dest)
 
 -- Emit a standard epilogue leave instruction
 -- that restores the rsp and rbp registers.
 leave :: EmitM m => m ()
 leave = emitInd "leave"
+
+-- Move the pointer to a constant into a location.
+--   movq $<i>, <loc>
+movConst :: EmitM m => LabIdent -> Reg -> m ()
+movConst (LabIdent i) reg_ = emitInd $ bin "mov" Quadruple (i ++ "(%rip)") (sizedReg Quadruple reg_) ""
 
 -- Emit a move from a source location to a register.
 --   mov<s> <src>, %<dest> # <comment>
@@ -247,6 +261,11 @@ pop srcloc = emitInd $ "pop " ++ loc Quadruple srcloc
 --   push <loc>
 push :: EmitM m => Loc -> String -> m ()
 push srcloc comment_ = emitInd $ "push " ++ loc Quadruple srcloc ++ comment comment_
+
+-- Emit a definition of a quad value.
+--   .quad <s>
+quadDef :: EmitM m => String -> m ()
+quadDef s = emitInd $ ".quad " ++ sanitiseAssembly s
 
 -- Emit a ret instruction that ends the current function call.
 ret :: EmitM m => m ()
@@ -322,11 +341,11 @@ sub src dest =
 -- based on the result of a bitwise-and performed on the operands.
 -- The operands are considered for their lower 8 bytes only.
 --   testb <op1>, <op2>
-test :: EmitM m => Loc -> Loc -> m ()
-test op1 op2 =
-    let op1String = loc Byte op1
-        op2String = loc Byte op2
-    in emitInd $ bin "test" Byte op1String op2String ""
+test :: EmitM m => Size -> Loc -> Loc -> m ()
+test size op1 op2 =
+    let op1String = loc size op1
+        op2String = loc size op2
+    in emitInd $ bin "test" size op1String op2String ""
 
 -- Emit a xor operation between a source and destination location.
 -- Saves the result in the destination.

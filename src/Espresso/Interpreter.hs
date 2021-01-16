@@ -89,7 +89,17 @@ callFromCallsite callsite ret = case callsite of
         if isNativeFun (toStr i1) (toStr i2) then runNative (toStr i2) vals ret else (do
             f <- askFun (toStr i1) (toStr i2)
             call f args ret)
-    CallVirt {} -> LatteIO.error "callvirt unimplemented"
+    CallVirt _ _ (QIdent _ _ i2) vals -> do
+        args <- mapM getVal vals
+        case args of
+            a:_ -> do
+                obj <- deref a
+                case obj of
+                    Inst cl _ -> do
+                        f <- askFun (clName cl) (toStr i2)
+                        call f args ret
+                    _ -> LatteIO.error $ "internal error. invalid object as self in callvirt " ++ show obj
+            []   -> LatteIO.error "internal error. empty arg list in callvirt."
 
 execute :: (LatteIO m, Monad m) => String -> String -> [Instr Pos] -> (Object -> InterpreterM m a) -> InterpreterM m a
 execute _ _ [] ret = ret PNull

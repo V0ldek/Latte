@@ -86,7 +86,7 @@ normaliseOut :: String -> String
 normaliseOut s = dropWhile isSpace $ reverse $ dropWhile isSpace $ reverse s
 
 testSets :: IO [ExecTestSet]
-testSets = sequence [coreTestSet, structTestSet, arrayTestSet]
+testSets = sequence [coreTestSet, structTestSet, arrayTestSet, objectsTestSet, callvirtTestSet, varTestSet]
 
 coreTestSet :: IO ExecTestSet
 coreTestSet = getTestSet coreTestsDirectory "Core"
@@ -96,6 +96,15 @@ arrayTestSet = getTestSet arrayTestDirectory "Array"
 
 structTestSet :: IO ExecTestSet
 structTestSet = getTestSet structTestDirectory "Struct"
+
+objectsTestSet :: IO ExecTestSet
+objectsTestSet = getTestSet objects1TestDirectory "Objects"
+
+callvirtTestSet :: IO ExecTestSet
+callvirtTestSet = getTestSet objects2TestDirectory "Callvirt"
+
+varTestSet :: IO ExecTestSet
+varTestSet = getTestSet varTestDictionary "Var"
 
 getTestSet :: FilePath -> String -> IO ExecTestSet
 getTestSet dir name = do
@@ -123,6 +132,15 @@ structTestDirectory = testDirectoryRoot </> "extensions" </> "struct"
 
 arrayTestDirectory :: FilePath
 arrayTestDirectory = testDirectoryRoot </> "extensions" </> "arrays1" </> "good"
+
+objects1TestDirectory :: FilePath
+objects1TestDirectory = testDirectoryRoot </> "extensions" </> "objects1" </> "good"
+
+objects2TestDirectory :: FilePath
+objects2TestDirectory = testDirectoryRoot </> "extensions" </> "objects2"
+
+varTestDictionary :: FilePath
+varTestDictionary = testDirectoryRoot </> "extensions" </> "var" </> "good"
 
 workDirectory :: FilePath
 workDirectory = "." </> "test" </> "x86_64Spec_workdir"

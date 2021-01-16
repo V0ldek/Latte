@@ -8,6 +8,8 @@ import           X86_64.Class
 import           X86_64.CodeGen.Consts
 import qualified X86_64.CodeGen.Emit   as Emit
 import           X86_64.CodeGen.GenM
+import           X86_64.Registers
+import           X86_64.Loc
 import           X86_64.Size
 
 -- Combine compiled methods to produce a full assembly file as string.
@@ -18,7 +20,9 @@ generateModule cls mthds allConsts =
                     [Emit.globalMain | mainEntry `elem` map mthdEntry mthds] ++
                     map Emit.constDef (constsElems allConsts)
            classComments = Emit.commentMultiline $ "Class metadata:":concatMap commentClass cls
-       in unlines (map Emit.emitAsString $ header ++ [classComments]) ++ "\n\n" ++ code
+       in unlines (map Emit.emitAsString $ header ++ (classComments:concatMap vtable cls)) ++ 
+          "\n" ++ unlines (map Emit.emitAsString nullRef) ++
+          "\n\n" ++ code
     where mainEntry = toStr $
             labelFor (QIdent () (SymIdent $ toStr topLevelClassIdent) (SymIdent $ toStr mainSymIdent)) entryLabel
           emitMthd mthd =
@@ -30,3 +34,9 @@ generateModule cls mthds allConsts =
                               "    Field type:   " ++ show (fldType fld),
                               "    Field offset: " ++ show (fldOffset fld),
                               "    Field size:   " ++ show (sizeInBytes $ typeSize $ fldType fld)]
+          vtable cl = if toStr (clName cl) == toStr topLevelClassIdent then []
+                      else Emit.label (vTableLabIdent (clName cl)) "":
+                           map (Emit.quadDef . fst) (Map.elems $ vtabMthds $ clVTable cl)
+          nullRef = [Emit.label nullrefLabel "runtime error on null dereference",
+                     Emit.and Quadruple (LocImm (-16)) (LocReg rsp) "16 bytes allign",
+                     Emit.callDirect "lat_nullref"]

@@ -43,16 +43,16 @@ spec = parallel $ do
     describe "Extension arrays bad" $ do
         tests <- runIO $ getLatTestsFromDir arraysBadDir
         mapM_ badTest tests
-    dont $ describe "Extension objects1 good" $ do
+    describe "Extension objects1 good" $ do
         tests <- runIO $ getLatTestsFromDir objects1GoodDir
         mapM_ goodTest tests
     describe "Extension objects1 bad" $ do
         tests <- runIO $ getLatTestsFromDir objects1BadDir
         mapM_ badTest tests
-    dont $ describe "Extension objects2 good" $ do
+    describe "Extension objects2 good" $ do
         tests <- runIO $ getLatTestsFromDir objects2GoodDir
         mapM_ goodTest tests
-    dont $ describe "Extension var good" $ do
+    describe "Extension var good" $ do
         tests <- runIO $ getLatTestsFromDir varGoodDir
         mapM_ goodTest tests
     describe "Extension var bad" $ do

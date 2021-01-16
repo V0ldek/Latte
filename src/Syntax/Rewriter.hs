@@ -49,8 +49,8 @@ rewriteStmt stmt =
     BStmt _ blk       -> BStmt code (rewriteBlock blk)
     Decl _ t items    -> Decl code (rewriteType t) (map rewriteItem items)
     Ass _ expr1 expr2 -> Ass code (rewriteExpr expr1) (rewriteExpr expr2)
-    Incr _ i          -> Incr code i
-    Decr _ i          -> Decr code i
+    Incr _ i          -> Ass code (EVar code i) (EAdd code (EVar code i) (Plus code) (ELitInt code 1))
+    Decr _ i          -> Ass code (EVar code i) (EAdd code (EVar code i) (Minus code) (ELitInt code 1))
     Ret _ expr        -> Ret code (rewriteExpr expr)
     VRet _            -> VRet code
     Cond _ expr stmt'  -> Cond code (rewriteExpr expr) (blkWrap $ rewriteStmt stmt')
@@ -70,7 +70,7 @@ rewriteStmt stmt =
                                 whileGuard = ERel exprCode idxVar (LTH exprCode) lenExpr
                                 arrAccess = EIdx exprCode arrVar idxVar
                                 elemDecl = Decl tCode t' [Init tCode i arrAccess]
-                                idxIncr = Incr exprCode forIndexIdent
+                                idxIncr = Ass code (EVar code forIndexIdent) (EAdd code (EVar code forIndexIdent) (Plus code) (ELitInt code 1))
 {- {                      -}    in BStmt stmtCode $ Block stmtCode [
 {-  var ~l_arr = <expr>; -}             arrDecl,
 {-  int ~l_idx = 0;      -}             idxDecl,
@@ -78,7 +78,7 @@ rewriteStmt stmt =
 {-  {                         -}        BStmt stmtCode $ Block stmtCode [
 {-   <t> <i> = ~l_arr[~l_idx];-}                elemDecl,
 {-   <stmt>                   -}                stmt'',
-{-   ~l_idx++;                -}                idxIncr
+{-   ~l_idx = ~l_idx + 1;     -}                idxIncr
 {-  }                         -}            ]
 {- }                      -}            ]
     SExp _ expr       -> SExp code (rewriteExpr expr)

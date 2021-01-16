@@ -53,7 +53,6 @@ SExp.      Stmt ::= Expr  ";" ;
 -- Types ---------------------------------------------------
 
 Int.       Type ::= "int" ;
-Str.       Type ::= "string" ;
 Bool.      Type ::= "boolean" ;
 Void.      Type ::= "void" ;
 Var.       Type ::= "var" ;

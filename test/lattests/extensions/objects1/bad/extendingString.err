@@ -1,2 +1,4 @@
-ERROR 
-syntax error at line 1, column 17 before `string'
+ERROR
+Undefined base class `string`.
+Line 1, character 1:
+In definition of class `a`.

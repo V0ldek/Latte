@@ -7,6 +7,7 @@ module SemanticAnalysis.Class (
     mthdType,
     mthdTypeIgnSelf,
     clCons,
+    stringCl,
     rootCl,
     rootType,
     fldCons,
@@ -16,7 +17,7 @@ module SemanticAnalysis.Class (
     showType
 ) where
 
-import           Control.Monad (unless)
+import           Control.Monad (unless, when)
 import           Data.List     (intercalate, sort)
 import qualified Data.Map      as Map
 import           Data.Maybe
@@ -27,10 +28,11 @@ import           Syntax.Code
 import           Utilities
 
 data Class a = Class {
-    clName    :: Ident,
-    clBase    :: Maybe (Class a),
-    clFields  :: Map.Map Ident Field,
-    clMethods :: [Method a]
+    clName     :: Ident,
+    clBase     :: Maybe (Class a),
+    clFields   :: [Field],
+    clFieldMap :: Map.Map Ident Field,
+    clMethods  :: Map.Map Ident (Method a)
 } deriving Functor
 
 data Field = Fld { fldName :: Ident, fldType :: Type (), fldCode :: ClDef Code}
@@ -57,7 +59,10 @@ mthdTypeIgnSelf (Mthd _ ret _ args _ _) = Fun () ret (map (\(Arg _ t _) -> () <$
 
 -- Phony class serving as a root of the inheritance hierarchy.
 rootCl :: Class a
-rootCl = Class (Ident "~object") Nothing Map.empty []
+rootCl = Class (Ident "~object") Nothing [] Map.empty Map.empty
+
+stringCl :: Class a
+stringCl = Class (Ident "string") Nothing [] Map.empty Map.empty
 
 rootType :: Type ()
 rootType = Cl () (clName rootCl)
@@ -75,9 +80,11 @@ clCons name base flds mthds = do
     unless (null conflicts) (conflFldsAndMthdsError conflicts)
     unless (null reservedFlds) (reservedFldError reservedFlds)
     unless (null reservedMthds) (reservedMthdsError reservedMthds)
+    when (name == Ident "string") stringRedefError
     let base' = if isNothing base then Just rootCl else Nothing
         fldMap = Map.fromList $ map (\f -> (fldName f, f)) flds
-    return $ Class name base' fldMap mthds
+        mthdMap = Map.fromList $ map (\m -> (mthdName m, m)) mthds
+    return $ Class name base' flds fldMap mthdMap
 
 -- Construct a field from ist constituents.
 fldCons :: Type a -> Ident -> ClDef Code -> Field
@@ -111,39 +118,40 @@ baseMethodCons typ i selfTyp args = do
 -- field and method tables according to inheritance rules.
 clExtend :: Class Code -> Class Code -> Either String (Class Code)
 clExtend cl base = do
-    flds <- combinedFlds
+    (flds, fldsMap) <- combinedFlds
     mthds <- combinedMthds
-    return $ Class (clName cl) (Just base) flds mthds
+    return $ Class (clName cl) (Just base) flds fldsMap mthds
     where combinedFlds =
-            let flds = clFields base `Map.union` clFields cl
-                (_, dups) = findDupsBy fldName (Map.elems (clFields base) ++ Map.elems (clFields cl))
-            in  if null dups then Right flds else redefFldsError dups
+            let fldsMap = clFieldMap base `Map.union` clFieldMap cl
+                flds = clFields base ++ clFields cl
+                (_, dups) = findDupsBy fldName (clFields base ++ clFields cl)
+            in  if null dups then Right (flds, fldsMap) else redefFldsError dups
           combinedMthds =
-            let subMthds = Map.fromList $ map (\m -> (mthdName m, m)) (clMethods cl)
-            in run (clMethods base) subMthds
+            let subMthds = clMethods cl
+            in run (Map.elems $ clMethods base) subMthds
             where
-                run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String [Method Code]
-                run [] subMthds = return $ Map.elems subMthds
+                run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String (Map.Map Ident (Method Code))
+                run [] subMthds = return subMthds
                 run (b:bs) subMthds =
                     let key = mthdName b
                     in case Map.lookup key subMthds of
-                           Nothing -> run bs subMthds >>= (\bs' -> return $ b : bs')
+                           Nothing -> Map.insert (mthdName b) b <$> run bs subMthds
                            Just m  -> do
                                let bt = mthdTypeIgnSelf b
                                    mt = mthdTypeIgnSelf m
-                               if bt == mt then run bs (Map.delete key subMthds) >>= (\bs' -> return $ m : bs')
+                               if bt == mt then Map.insert (mthdName m) m <$> run bs (Map.delete key subMthds)
                                            else redefMthdError b m
 
 -- Mostly used for debugging purposes.
 instance Show (Class a) where
-    show (Class (Ident name) base flds mthds) = intercalate "\n" (header : map indent (fields ++ methods))
+    show (Class (Ident name) base flds _ mthds) = intercalate "\n" (header : map indent (fields ++ methods))
         where
             header = ".class " ++ name ++ extends ++ ":"
             extends = case base of
                 Nothing    -> ""
                 Just clExt -> let Ident x = clName clExt in " extends " ++ x
-            fields = ".fields:" : map (indent . show) (Map.elems flds)
-            methods = ".methods:" : map (indent . show) mthds
+            fields = ".fields:" : map (indent . show) flds
+            methods = ".methods:" : map (indent . show) (Map.elems mthds)
             indent x = "  " ++ x
 
 instance Show (Method a) where
@@ -155,7 +163,6 @@ instance Show Field where
 showType :: Type a -> String
 showType typ = case typ of
     Int _             -> "int"
-    Str _             -> "string"
     Bool _            -> "boolean"
     Void _            -> "void"
     Var _             -> "var"
@@ -190,6 +197,9 @@ dupMthdsError mthds = Left $ intercalate "\n" (header : ctxs)
     where header = "Duplicate method identifiers: `" ++ intercalate "`, `" (dedup $ map (showI . mthdName) mthds) ++ "`."
           ctxs = sort $ map ctx mthds
           ctx mthd = lineInfo (pos $ mthdCode mthd)
+
+stringRedefError :: Either String a
+stringRedefError = Left "Cannot redefine runtime class `string`."
 
 conflFldsAndMthdsError :: [(Field, Method a)] -> Either String b
 conflFldsAndMthdsError confls = Left $ intercalate "\n" (header : ctxs)

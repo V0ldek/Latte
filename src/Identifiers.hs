@@ -79,12 +79,18 @@ sanitiseAssembly s = case s of
 selfSymIdent :: Ident
 selfSymIdent = Ident "self"
 
+nullrefLabel :: LabIdent
+nullrefLabel = LabIdent "__nullref"
+
 -- Identifier of the class that wraps top level functions.
 topLevelClassIdent :: Ident
 topLevelClassIdent = Ident "~cl_TopLevel"
 
 valIdent :: String -> ValIdent
 valIdent = ValIdent . ("%v_" ++)
+
+vTableLabIdent :: SymIdent -> LabIdent
+vTableLabIdent (SymIdent i) =  LabIdent $ "__vtable_" ++ i
 
 runtimeSymbols :: [String]
 runtimeSymbols = [
@@ -93,7 +99,7 @@ runtimeSymbols = [
         "lat_read_int",
         "lat_read_string",
         "lat_error",
-        "lat_nullchk",
+        "lat_nullref",
         "lat_new_string",
         "lat_cat_strings"
     ]
