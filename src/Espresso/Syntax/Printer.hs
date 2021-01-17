@@ -26,8 +26,8 @@ render d = rend 0 (map ($ "") $ d []) "" where
     ".method":ts -> new i . space ".method" . rend i ts
     "[":"]":"]":ts -> space "[" . showChar ']' . rend i ("]":ts)
     "[" : "]":ts -> space "[" . showChar ']' . new i . rend i ts
-    "[":Label l:ts -> space "[" . new i . rend i (l:ts)
-    "["      :ts -> showChar '[' . new (i+1) . rend (i+1) ts
+    ":":"[":Label l:ts -> space ":" . showChar '[' . new i . rend i (l:ts)
+    ":" : "[":ts -> space ":" . showChar '[' . new (i+1) . rend (i+1) ts
     "("      :ts -> showChar '(' . rend i ts
     "{"      :ts -> showChar '{' . new (i+1) . rend (i+1) ts
     "}" : ";":ts -> new (i-1) . space "}" . showChar ';' . new (i-1) . rend (i-1) ts
@@ -44,7 +44,7 @@ render d = rend 0 (map ($ "") $ d []) "" where
     Label l1:":":Label l2:":":ts -> showString l1 . showChar ':' . new i . rend i (l2:":":ts)
     Label l:":":"]":ts -> showString l . showChar ':' . rend (i+1) ("]":ts)
     Label l:":":ts -> showString l . showChar ':' . new (i+1) . rend (i+1) ts
-    t:":":"[":ts -> showString t . space ":" . rend i ("[":ts)
+    t:":":"[":ts -> showString t . rend i (":":"[":ts)
     t   : ":":ts -> showString t . showChar ':' . new i . rend i ts
     ":"      :ts -> showChar ':' . new i . rend i ts
     t  : "," :ts -> showString t . space "," . rend i ts
@@ -149,7 +149,6 @@ instance Print (FType a) where
 instance Print (SType a) where
   prt i e = case e of
     Int _ -> prPrec i 0 (concatD [doc (showString "int")])
-    Str _ -> prPrec i 0 (concatD [doc (showString "string")])
     Bool _ -> prPrec i 0 (concatD [doc (showString "boolean")])
     Void _ -> prPrec i 0 (concatD [doc (showString "void")])
     Arr _ stype -> prPrec i 0 (concatD [prt 0 stype, doc (showString "[]")])
@@ -181,12 +180,15 @@ instance Print (Instr a) where
     IUnOp _ valident unop val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 unop, prt 0 val, doc (showString ";")])
     IVCall _ call -> prPrec i 0 (concatD [prt 0 call, doc (showString ";")])
     ICall _ valident call -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 call, doc (showString ";")])
+    INew _ valident stype -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "new"), prt 0 stype, doc (showString ";")])
+    INewArr _ valident stype val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "newarr"), prt 0 stype, concatD [doc (showString "["), prt 0 val, doc (showString "]")], doc (showString ";")])
     IJmp _ labident -> prPrec i 0 (concatD [doc (showString "jump"), prt 0 labident, doc (showString ";")])
     ICondJmp _ val labident1 labident2 -> prPrec i 0 (concatD [doc (showString "jump"), doc (showString "if"), prt 0 val, doc (showString "then"), prt 0 labident1, doc (showString "else"), prt 0 labident2, doc (showString ";")])
     ILoad _ valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "load"), prt 0 val, doc (showString ";")])
     IStore _ val1 val2 -> prPrec i 0 (concatD [doc (showString "store"), prt 0 val1, prt 0 val2, doc (showString ";")])
     IFld _ valident val qident -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "fldptr"), prt 0 val, prt 0 qident, doc (showString ";")])
     IArr _ valident val1 val2 -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "elemptr"), prt 0 val1, doc (showString "["), prt 0 val2, doc (showString "]"), doc (showString ";")])
+    IArrLen _ valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "arrlen"), prt 0 val, doc (showString ";")])
     IPhi _ valident phivariants -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "phi"), doc (showString "("), prt 0 phivariants, doc (showString ")"), doc (showString ";")])
   prtList _ [] = (concatD [])
   prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
@@ -207,7 +209,7 @@ instance Print (Val a) where
     VNegInt _ n -> prPrec i 0 (concatD [doc (showString "-"), prt 0 n])
     VTrue _ -> prPrec i 0 (concatD [doc (showString "true")])
     VFalse _ -> prPrec i 0 (concatD [doc (showString "false")])
-    VNull _ -> prPrec i 0 (concatD [doc (showString "null")])
+    VNull _ stype -> prPrec i 0 (concatD [prt 0 stype, doc (showString "null")])
     VVal _ stype valident -> prPrec i 0 (concatD [prt 0 stype, prt 0 valident])
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
@@ -303,12 +305,15 @@ instance Show a => PrintWithComments (Instr a) where
     IUnOp a valident unop val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 unop, prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IVCall a call -> prPrec i 0 (concatD [prt 0 call, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     ICall a valident call -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), prt 0 call, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    INew a valident stype -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "new"), prt 0 stype, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    INewArr a valident stype val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "newarr"), prt 0 stype, concatD [doc (showString "["), prt 0 val, doc (showString "]")], doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IJmp a labident -> prPrec i 0 (concatD [doc (showString "jump"), prt 0 labident, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     ICondJmp a val labident1 labident2 -> prPrec i 0 (concatD [doc (showString "jump"), doc (showString "if"), prt 0 val, doc (showString "then"), prt 0 labident1, doc (showString "else"), prt 0 labident2, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     ILoad a valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "load"), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IStore a val1 val2 -> prPrec i 0 (concatD [doc (showString "store"), prt 0 val1, prt 0 val2, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IFld a valident val qident -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "fldptr"), prt 0 val, prt 0 qident, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IArr a valident val1 val2 -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "elemptr"), prt 0 val1, doc (showString "["), prt 0 val2, doc (showString "]"), doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
+    IArrLen a valident val -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "arrlen"), prt 0 val, doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
     IPhi a valident phivariants -> prPrec i 0 (concatD [prt 0 valident, doc (showString ":="), doc (showString "phi"), doc (showString "("), prt 0 phivariants, doc (showString ")"), doc (showString ";"), doc (showString "/*"), doc (shows a), doc (showString "*/")])
   prtListWComments _ [] = (concatD [])
   prtListWComments _ (x:xs) = (concatD [prtWComments 0 x, prtWComments 0 xs])

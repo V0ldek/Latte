@@ -68,8 +68,15 @@ ffirst = find (const True)
 single :: (Foldable f) => f a -> a
 single xs = fromMaybe (error "single: empty structure") (ffirst xs)
 
+-- Iterate function until reaching a fixpoint
+-- as determined by the type's equality relation.
 fixpoint :: (Eq a) => (a -> a) -> a -> a
-fixpoint f x = let x' = f x in if x == x' then x else fixpoint f x'
+fixpoint = fixpointBy id
+
+-- Iterate function until reaching a fixpoint
+-- as determined by the equality on the ordering map.
+fixpointBy :: (Eq b) => (a -> b) -> (a -> a) -> a -> a
+fixpointBy ord f x = let x' = f x in if ord x == ord x' then x else fixpointBy ord f x'
 
 splitLast :: [a] -> (a, [a])
 splitLast [] = error "empty"

@@ -33,14 +33,15 @@ size1Opts = foldr optComp optId [
         optCmpZero2,
         optInc,
         optDec,
-        optZero
+        optZero,
+        optEmptyMov
     ]
 
 size2Opts :: (String, String) -> Maybe [String]
 size2Opts = foldr optComp optId [optJmpToNext]
 
 size3Opts :: (String, String, String) -> Maybe [String]
-size3Opts = foldr optComp optId [optXchg, optCondJmp]
+size3Opts = foldr optComp optId [optXchg, optCmpJmp, optCondJmp]
 
 optId :: a -> Maybe b
 optId = const Nothing
@@ -163,6 +164,20 @@ optCmpZero2 line =
          else Nothing
 
 -- From:
+--   movx a, a
+-- To:
+-- _
+optEmptyMov :: String -> Maybe [String]
+optEmptyMov line =
+    let pattern_ = [re|mov[a-z] ([^[:space:]]+), ([^[:space:]]+)|]
+    --                               capt1            capt2
+        m = line ?=~ pattern_
+    in if matched m
+         then let (src, target) = extrMatch2 m
+              in if src == target then Just [] else Nothing
+         else Nothing
+
+-- From:
 --   jmp .L_label
 -- .L_label:
 -- To:
@@ -187,8 +202,8 @@ optJmpToNext (line1, line2) =
 --   jz .L_label
 -- To:
 --   j(!x) .L_label
-optCondJmp :: (String, String, String) -> Maybe [String]
-optCondJmp (line1, line2, line3) =
+optCmpJmp :: (String, String, String) -> Maybe [String]
+optCmpJmp (line1, line2, line3) =
     let pattern1 = [re|set([a-z]) ([^[:space:]]+)|]
     --                     capt1      capt2
         pattern2 = [re|testb ([^[:space:]]+), ([^[:space:]]+)|]
@@ -204,17 +219,38 @@ optCondJmp (line1, line2, line3) =
                (target2_1, target2_2) = extrMatch2 m2
                label = extrMatch m3
            in if target1 == target2_1 && target2_1 == target2_2
-                then Just ["  j" ++ negated cmp ++ " " ++ label ++ concatMap matchSuf [m1, m2, m3]]
+                then Just ["  j" ++ negatedCond cmp ++ " " ++ label ++ concatMap matchSuf [m1, m2, m3]]
                 else Nothing
       else Nothing
-    where negated x = case x of
-            "g"  -> "le"
-            "ge" -> "l"
-            "l"  -> "ge"
-            "le" -> "l"
-            "e"  -> "ne"
-            "ne" -> "e"
-            _    -> error $ "optCondJmp: invalid condition " ++ x
+
+-- From:
+--   jx .L_label
+--   jmp .L_label2
+-- .L_label:
+-- To:
+--   j(!x) .L_label2
+-- .L_label:
+optCondJmp :: (String, String, String) -> Maybe [String]
+optCondJmp (line1, line2, line3) =
+    let pattern1 = [re|j([a-z]) ([^[:space:]]+)|]
+    --                   capt1       capt2
+        pattern2 = [re|jmp ([^[:space:]]+)|]
+    --                          capt1
+        pattern3 = [re|([^[:space:]]+):|]
+    --                      capt1
+        m1 = line1 ?=~ pattern1
+        m2 = line2 ?=~ pattern2
+        m3 = line3 ?=~ pattern3
+    in
+    if matched m1 && matched m2 && matched m3
+      then let (cmp, target1) = extrMatch2 m1
+               target2        = extrMatch m2
+               label          = extrMatch m3
+           in if target1 == label
+                then Just ["  j" ++ negatedCond cmp ++ " " ++ target2 ++ concatMap matchSuf [m1, m2],
+                           label ++ ":" ++ matchSuf m3]
+                else Nothing
+      else Nothing
 
 -- From:
 --   movx a, c
@@ -252,3 +288,15 @@ extrMatch3 m = (capturedText $ m !$ [cp|1|],
 
 matchSuf :: Match String -> String
 matchSuf m = captureSuffix $ m !$ [cp|0|]
+
+negatedCond :: String -> String
+negatedCond x = case x of
+            "g"  -> "le"
+            "ge" -> "l"
+            "l"  -> "ge"
+            "le" -> "l"
+            "e"  -> "ne"
+            "ne" -> "e"
+            "z"  -> "nz"
+            "nz" -> "z"
+            _    -> error $ "negatedCond: invalid condition " ++ x

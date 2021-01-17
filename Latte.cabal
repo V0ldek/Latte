@@ -4,10 +4,10 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 028249ea0ebe143be13f7c63bd5fe2393ecd494c17d63a038438551cb0e68895
+-- hash: 13ed02537ed77fc976e56d15e2cbed102f054855cae2501059865c0076828221
 
 name:           Latte
-version:        0.9.0.0
+version:        0.10.0.0
 description:    Please see the README on GitHub at <https://github.com/V0ldek/Latte#readme>
 homepage:       https://github.com/githubuser/Latte#readme
 bug-reports:    https://github.com/githubuser/Latte/issues
@@ -38,6 +38,7 @@ library
       Espresso.ControlFlow.Liveness
       Espresso.ControlFlow.Phi
       Espresso.Interpreter
+      Espresso.Optimisation.CFGTransform
       Espresso.Syntax.Abs
       Espresso.Syntax.Lexer
       Espresso.Syntax.Parser
@@ -57,6 +58,7 @@ library
       Syntax.Printer
       Syntax.Rewriter
       Utilities
+      X86_64.Class
       X86_64.CodeGen.Consts
       X86_64.CodeGen.Emit
       X86_64.CodeGen.Epilogue
@@ -94,7 +96,7 @@ executable espi
       Paths_Latte
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Espi -Wall
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N2 -main-is Espi -Wall
   build-depends:
       Latte
     , array >=0.5 && <0.6
@@ -115,7 +117,7 @@ executable latc_x86_64
       Paths_Latte
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -main-is Latc_x86_64 -Wall
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N2 -main-is Latc_x86_64 -Wall
   build-depends:
       Latte
     , array >=0.5 && <0.6

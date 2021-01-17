@@ -16,7 +16,7 @@ data Stack = Stack {
     stackReservedSize  :: Int64,
     stackReservedSlots :: Map.Map ValIdent Slot,
     stackOverheadSize  :: Int64,
-    stackOccupiedSlots :: Map.Map ValIdent Slot}
+    stackOccupiedSlots :: Map.Map ValIdent [Slot]}
 
 data Slot = Slot {
     -- Offset on the stack. The stack grows downwards,
@@ -39,7 +39,7 @@ stackReserve vals sInit = foldl' reserveOne sInit vals
                 slot = Slot (-sizeBefore - bytes) size
             in  s {stackReservedSize = sizeBefore + bytes,
                    stackReservedSlots = Map.insert vi slot (stackReservedSlots s),
-                   stackOccupiedSlots = Map.insert vi slot (stackOccupiedSlots s)}
+                   stackOccupiedSlots = Map.insertWith (++) vi [slot] (stackOccupiedSlots s)}
 
 -- Get all variables that have reserved locations along with these locations.
 stackReservedLocs :: Stack -> [(ValIdent, Loc)]
@@ -62,7 +62,7 @@ stackPush vi size s =
         bytes = sizeInBytes size
         slot = Slot (-sizeBefore - stackReservedSize s - bytes) size
         s' = s {stackOverheadSize = sizeBefore + bytes,
-                stackOccupiedSlots = Map.insert vi slot (stackOccupiedSlots s)}
+                stackOccupiedSlots = Map.insertWith (++) vi [slot] (stackOccupiedSlots s)}
     in (slotToLoc slot, s')
 
 -- Increase the stack overhead with some unidentified value.
@@ -81,8 +81,14 @@ stackIsValueReserved vi = Map.member vi . stackReservedSlots
 -- has no reserved slot.
 stackInsertReserved :: ValIdent -> Stack -> (Loc, Stack)
 stackInsertReserved vi s = case Map.lookup vi (stackReservedSlots s) of
-    Just slot -> (slotToLoc slot, s {stackOccupiedSlots = Map.insert vi slot (stackOccupiedSlots s)})
+    Just slot -> (slotToLoc slot, s {stackOccupiedSlots = Map.insertWith (++) vi [slot] (stackOccupiedSlots s)})
     Nothing -> error $ "stackInsertReserved: value with not reserved slot " ++ toStr vi
+
+-- Insert a given variable into the given slot.
+stackInsert :: ValIdent -> Slot -> Stack -> Stack
+stackInsert vi slot s = if (-slotOffset slot) + sizeInBytes (slotSize slot) < stackSize s
+                          then error "stackInsert: stack size exceeded"
+                          else s {stackOccupiedSlots = Map.insertWith (++) vi [slot] (stackOccupiedSlots s)}
 
 -- Whether the given variable is saved on the stack.
 stackContains :: ValIdent -> Stack -> Bool
@@ -91,9 +97,13 @@ stackContains vi s = Map.member vi (stackOccupiedSlots s)
 -- Align the stack to take a multiple of 16 bytes. Returns the applied additional offset
 -- and the aligned stack.
 stackAlign16 :: Stack -> (Int64, Stack)
-stackAlign16 s = let misalignment = 16 - (stackReservedSize s + stackOverheadSize s) `mod` 16
+stackAlign16 s = let misalignment = 16 - stackSize s `mod` 16
                      x = if misalignment == 16 then 0 else misalignment
                  in (x, s {stackOverheadSize = stackOverheadSize s + x})
 
 slotToLoc :: Slot -> Loc
 slotToLoc slot = LocStack (slotOffset slot)
+
+-- Size of the entire stack counting from 0 downwards.
+stackSize :: Stack -> Int64
+stackSize s = stackReservedSize s + stackOverheadSize s

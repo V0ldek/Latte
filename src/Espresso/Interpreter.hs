@@ -6,10 +6,12 @@ module Espresso.Interpreter (interpret) where
 
 import           Control.Monad.Reader
 import           Control.Monad.State
+import           Data.Bifunctor       (Bifunctor (first))
 import           Data.List
 import qualified Data.Map             as Map
 import           Data.Maybe
 import           Espresso.Syntax.Abs
+import qualified Espresso.Types       as Types
 import           Identifiers
 import           LatteIO
 import           System.Exit          (ExitCode (..))
@@ -23,7 +25,7 @@ type Store = Map.Map Loc Object
 data Env = Env { objEnv :: OEnv, clEnv :: CEnv, labelEnv :: LEnv }
 
 data Object = Inst { objType_ :: Class, objData_ :: OEnv }
-            | Array  { arrType_ :: Class, arrData_ :: [Object]}
+            | Array  { arrType_ :: SType (), arrData_ :: [Loc], arrLength_ :: Int}
             | Ptr   { ref :: Loc }
             | PInt Int
             | PBool Bool
@@ -87,7 +89,17 @@ callFromCallsite callsite ret = case callsite of
         if isNativeFun (toStr i1) (toStr i2) then runNative (toStr i2) vals ret else (do
             f <- askFun (toStr i1) (toStr i2)
             call f args ret)
-    CallVirt {} -> LatteIO.error "callvirt unimplemented"
+    CallVirt _ _ (QIdent _ _ i2) vals -> do
+        args <- mapM getVal vals
+        case args of
+            a:_ -> do
+                obj <- deref a
+                case obj of
+                    Inst cl _ -> do
+                        f <- askFun (clName cl) (toStr i2)
+                        call f args ret
+                    _ -> LatteIO.error $ "internal error. invalid object as self in callvirt " ++ show obj
+            []   -> LatteIO.error "internal error. empty arg list in callvirt."
 
 execute :: (LatteIO m, Monad m) => String -> String -> [Instr Pos] -> (Object -> InterpreterM m a) -> InterpreterM m a
 execute _ _ [] ret = ret PNull
@@ -120,6 +132,27 @@ execute prevLabel currLabel (instr : is) ret = case instr of
     ICall _ i callsite -> callFromCallsite callsite (\res -> do
         newval <- store (toStr i) res
         localObj newval $ execute prevLabel currLabel is ret)
+    INew _ i t -> case Types.deref t of
+        Cl _ (SymIdent cli) -> do
+            cl <- askCl cli
+            locs <- mapM (\f -> allocDefault (fldType f) >>= (\l -> return (f, l))) (Map.elems $ clFlds cl)
+            let flds = Map.fromList $ map (first fldName) locs
+                obj = Inst cl flds
+            loc <- newloc
+            storeObj loc obj
+            let ref_ = Ptr loc
+            newval <- store (toStr i) ref_
+            localObj newval $ execute prevLabel currLabel is ret
+        _ -> Prelude.error $ "internal error. new on a nonclass" ++ show t
+    INewArr _ i t val -> do
+        size <- getVal val
+        case size of
+            PInt n -> do
+                locs <- replicateM n (allocDefault t)
+                let arr = Array (() <$ t) locs n
+                newval <- store (toStr i) arr
+                localObj newval $ execute prevLabel currLabel is ret
+            _ -> Prelude.error $ "internal error. invalid type of size of array " ++ show size
     IJmp _ i -> do
         is' <- askLabel (toStr i)
         execute currLabel (toStr i) is' ret
@@ -133,17 +166,43 @@ execute prevLabel currLabel (instr : is) ret = case instr of
             else (toStr i2, is2)
         execute currLabel label is' ret
     ILoad _ i v -> do
-        x <- getVal v
-        x' <- deref x
-        newval <- store (toStr i) x'
+        x <- getVal v >>= deref
+        newval <- store (toStr i) x
         localObj newval $ execute prevLabel currLabel is ret
     IStore _ v1 v2 -> do
         x1 <- getVal v1
         x2 <- getVal v2
-        storeInto x1 x2
+        storeInto x2 x1
         execute prevLabel currLabel is ret
-    IFld {} -> LatteIO.error "fields unimplemented"
-    IArr {} -> LatteIO.error "arrays unimplemented"
+    IFld _ i v (QIdent _ _ (SymIdent fldI)) -> do
+        x <- getVal v
+        obj <- deref x
+        case obj of
+            Inst _ flds -> case Map.lookup fldI flds of
+                Just loc -> do
+                    newval <- store (toStr i) (Ptr loc)
+                    localObj newval $ execute prevLabel currLabel is ret
+                Nothing  -> LatteIO.error $ "internal error. nonexistent field " ++ fldI
+            _ -> LatteIO.error $ "internal error. fldptr called on noninstance " ++ show obj
+    IArr _ i arrV idxV -> do
+        arr <- getVal arrV
+        idx <- getVal idxV
+        case (arr, idx) of
+            (Array _ data_ len, PInt n) ->
+                if len <= n
+                  then LatteIO.error $ "internal error. arrptr index overflow " ++ show n ++ " >= " ++ show len
+                  else do
+                    let loc = data_ !! n
+                    newval <- store (toStr i) (Ptr loc)
+                    localObj newval $ execute prevLabel currLabel is ret
+            _ -> LatteIO.error $ "internal error. invalid types in arrptr " ++ show arr ++ ", " ++ show idx
+    IArrLen _ i v -> do
+        x <- getVal v
+        case x of
+            Array _ _ len -> do
+                newval <- store (toStr i) (PInt len)
+                localObj newval $ execute prevLabel currLabel is ret
+            _ -> LatteIO.error $ "internal error. invalid type in arrlen " ++ show x
     IPhi _ i variants -> do
         let Just (PhiVar _ _ val) = find (\(PhiVar _ l _) -> toStr l == prevLabel) variants
         obj <- getVal val
@@ -208,19 +267,28 @@ getVal val = case val of
     VNegInt _ n -> return $ PInt (fromInteger (-n))
     VTrue _     -> return $ PBool True
     VFalse _    -> return $ PBool False
-    VNull _     -> return PNull
-    VVal _ _ i  -> getObj (toStr i)
-
-getObj :: (LatteIO m, Monad m) => String -> InterpreterM m Object
-getObj i = do
-    ptr <- askObj i
-    deref (Ptr ptr)
+    VNull {}    -> return PNull
+    VVal _ _ i  -> askObj (toStr i) >>= (deref . Ptr)
 
 newloc :: (LatteIO m, Monad m) => InterpreterM m Int
 newloc = do
     objs <- get
     if Map.null objs then return 0
     else let (k, _) = Map.findMax objs in return $ k + 1
+
+allocDefault :: (LatteIO m, Monad m, Show a) => SType a -> InterpreterM m Loc
+allocDefault t = do
+    loc <- newloc
+    let val = defaultValue t
+    storeObj loc val
+    return loc
+
+defaultValue :: Show a => SType a -> Object
+defaultValue t = case t of
+    Int _  -> PInt 0
+    Bool _ -> PBool False
+    Ref {} -> PNull
+    _ -> Prelude.error $ "internal error. no default value for type " ++ show t
 
 localObjs :: (LatteIO m, Monad m) => [(String, Loc)] -> InterpreterM m a -> InterpreterM m a
 localObjs objs = local (\e -> e { objEnv = Map.fromList objs })
@@ -243,7 +311,7 @@ deref x = case x of
         case mbobj of
             Nothing  -> LatteIO.error ("internal error, pointer " ++ show loc ++ " not found")
             Just obj -> return obj
-    _       -> Prelude.error "internal error, invalid deref"
+    _       -> return x
 
 isTrue :: (LatteIO m, Monad m) => Object -> InterpreterM m Bool
 isTrue x = case x of
@@ -320,17 +388,17 @@ runNative i vals ret = case i of
     "error"       -> LatteIO.error ""
     "readInt"     -> readInt >>= ret . PInt
     "readString"  -> readString >>= ret . PStr
-    _             -> Prelude.error $ "internal error, invalid native fun " ++ i
+    _             -> LatteIO.error $ "internal error, invalid native fun " ++ i
 
 instance Show Object where
     show o = case o of
-        Inst t _  -> clName t
-        Array t d -> clName t ++ "[" ++ show (length d) ++ "]"
-        Ptr t     -> show t ++ "&"
-        PInt _    -> "int"
-        PBool _   -> "bool"
-        PStr _    -> "string"
-        PNull     -> "null"
+        Inst t _    -> clName t
+        Array t _ l -> show t ++ "[" ++ show l ++ "]"
+        Ptr t       -> "&" ++ show t
+        PInt _      -> "int"
+        PBool _     -> "bool"
+        PStr _      -> "string"
+        PNull       -> "null"
 
 instance (Monad m, LatteIO m) => LatteIO (InterpreterM m) where
     readInt = lift $ lift readInt

@@ -32,6 +32,9 @@ data Node a = Node {
     nodeIn    :: Set.Set LabIdent
 } deriving (Eq, Functor, Foldable)
 
+instance Show (Node a) where
+    show = toStr . nodeLabel
+
 -- Convert an Espresso method to a CFG. Code that is unreachable within a basic block,
 -- that is instructions occuring after a jump, are removed.
 cfg :: Method a -> CFG a
@@ -105,7 +108,7 @@ addEdge from to = do
             Just fromNode -> fromNode {nodeOut = Set.insert to (nodeOut fromNode)}
             Nothing -> error $ "internal error. no src label " ++ toStr from
         toNode' = case mbtoNode of
-            Just toNode -> toNode {nodeIn = Set.insert from (nodeOut toNode)}
+            Just toNode -> toNode {nodeIn = Set.insert from (nodeIn toNode)}
             Nothing     -> error $ "internal error. no dest label " ++ toStr to
     modify (\(CFG g) -> CFG $ Map.insert from fromNode' g)
     modify (\(CFG g) -> CFG $ Map.insert to toNode' g)

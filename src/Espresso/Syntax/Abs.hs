@@ -59,7 +59,6 @@ instance Functor FType where
         FType a stype stypes -> FType (f a) (fmap f stype) (map (fmap f) stypes)
 data SType a
     = Int a
-    | Str a
     | Bool a
     | Void a
     | Arr a (SType a)
@@ -70,7 +69,6 @@ data SType a
 instance Functor SType where
     fmap f x = case x of
         Int a         -> Int (f a)
-        Str a         -> Str (f a)
         Bool a        -> Bool (f a)
         Void a        -> Void (f a)
         Arr a stype   -> Arr (f a) (fmap f stype)
@@ -99,12 +97,15 @@ data Instr a
     | IUnOp a ValIdent (UnOp a) (Val a)
     | IVCall a (Call a)
     | ICall a ValIdent (Call a)
+    | INew a ValIdent (SType a)
+    | INewArr a ValIdent (SType a) (Val a)
     | IJmp a LabIdent
     | ICondJmp a (Val a) LabIdent LabIdent
     | ILoad a ValIdent (Val a)
     | IStore a (Val a) (Val a)
     | IFld a ValIdent (Val a) (QIdent a)
     | IArr a ValIdent (Val a) (Val a)
+    | IArrLen a ValIdent (Val a)
     | IPhi a ValIdent [PhiVariant a]
   deriving (Eq, Ord, Show, Read, Foldable)
 
@@ -120,12 +121,15 @@ instance Functor Instr where
         IUnOp a valident unop val -> IUnOp (f a) valident (fmap f unop) (fmap f val)
         IVCall a call -> IVCall (f a) (fmap f call)
         ICall a valident call -> ICall (f a) valident (fmap f call)
+        INew a valident stype -> INew (f a) valident (fmap f stype)
+        INewArr a valident stype val -> INewArr (f a) valident (fmap f stype) (fmap f val)
         IJmp a labident -> IJmp (f a) labident
         ICondJmp a val labident1 labident2 -> ICondJmp (f a) (fmap f val) labident1 labident2
         ILoad a valident val -> ILoad (f a) valident (fmap f val)
         IStore a val1 val2 -> IStore (f a) (fmap f val1) (fmap f val2)
         IFld a valident val qident -> IFld (f a) valident (fmap f val) (fmap f qident)
         IArr a valident val1 val2 -> IArr (f a) valident (fmap f val1) (fmap f val2)
+        IArrLen a valident val -> IArrLen (f a) valident (fmap f val)
         IPhi a valident phivariants -> IPhi (f a) valident (map (fmap f) phivariants)
 data PhiVariant a = PhiVar a LabIdent (Val a)
   deriving (Eq, Ord, Show, Read, Foldable)
@@ -147,7 +151,7 @@ data Val a
     | VNegInt a Integer
     | VTrue a
     | VFalse a
-    | VNull a
+    | VNull a (SType a)
     | VVal a (SType a) ValIdent
   deriving (Eq, Ord, Show, Read, Foldable)
 
@@ -157,7 +161,7 @@ instance Functor Val where
         VNegInt a integer     -> VNegInt (f a) integer
         VTrue a               -> VTrue (f a)
         VFalse a              -> VFalse (f a)
-        VNull a               -> VNull (f a)
+        VNull a stype         -> VNull (f a) (fmap f stype)
         VVal a stype valident -> VVal (f a) (fmap f stype) valident
 data Op a
     = OpAdd a

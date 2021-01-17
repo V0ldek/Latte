@@ -1,0 +1,3 @@
+ERROR
+Cannot redefine runtime class `string`.
+Line 1, character 1: In definition of class `string`.

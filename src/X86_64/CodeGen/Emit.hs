@@ -5,9 +5,11 @@ module X86_64.CodeGen.Emit (
     emitAsString,
     add,
     and,
-    call,
+    callAddress,
+    callDirect,
     cdq,
     cmp,
+    commentMultiline,
     constDef,
     decrStack,
     extern,
@@ -18,13 +20,18 @@ module X86_64.CodeGen.Emit (
     jmp,
     jz,
     label,
-    leave,
+    lea,
     leaOfConst,
+    leave,
+    movConst,
+    movFromMemToReg,
+    movFromRegToMem,
     movToReg,
     movToStack,
     neg,
     pop,
     push,
+    quadDef,
     ret,
     sal,
     sar,
@@ -62,16 +69,16 @@ emitAsString f = let PE s = f in s
 
 -- Emit an addition operation between a source and destination location.
 -- Saves the result in the destination.
---   add<s> <src>, <dest>
+--   add<s> <src>, <dest> # <comment>
 -- where <s> is the AT&T instruction suffix based on <size>.
-add :: EmitM m => Loc -> Loc -> m ()
-add src dest =
+add :: EmitM m => Loc -> Loc -> String -> m ()
+add src dest comment_ =
     let srcString = loc Double src
         destString = loc Double dest
     in case (src, dest) of
         (_, LocImm _) -> error "internal error. add to immediate"
         (LocStack _, LocStack _) -> error "internal error. add from stack to stack"
-        _ -> emitInd $ bin "add" Double srcString destString ""
+        _ -> emitInd $ bin "add" Double srcString destString comment_
 
 -- Emit an and operation between a source and destination location.
 -- Saves the result in the destination.
@@ -86,10 +93,16 @@ and size src dest comment_ =
         (LocStack _, LocStack _) -> error "internal error. and from stack to stack"
         _ -> emitInd $ bin "and" size srcString destString comment_
 
--- Emit a call instruction.
+-- Emit a call instruction to the address in the given memory location.
+--   call *<offset>(%<reg>) # <comment>
+callAddress :: EmitM m => Reg -> Int64 -> String -> m ()
+callAddress reg_ offset comment_ =
+    emitInd $ "call *" ++ show offset ++ "(" ++ sizedReg Quadruple reg_ ++ ")" ++ comment comment_
+
+-- Emit a call instruction to a label.
 --   call <f>
-call :: EmitM m => String -> m ()
-call f = emitInd $ "call " ++ sanitiseAssembly f
+callDirect :: EmitM m => String -> m ()
+callDirect f = emitInd $ "call " ++ sanitiseAssembly f
 
 -- Emit a sign-extend instruction for division purposes, see idiv.
 -- Loads the sign of eax into edx.
@@ -144,6 +157,7 @@ incrStack n comment_ = emitInd $ "subq " ++ lit64 n ++ ", %rsp" ++ comment comme
 idiv :: EmitM m => Size -> Loc -> m ()
 idiv size loc_ = case loc_ of
     LocImm {} -> error "internal error. idiv on an immediate."
+    LocPtr {} -> error "internal error. idiv with ptr"
     _         -> emitInd $ "idiv" ++ sizeSuf size ++ " " ++ loc size loc_
 
 -- Emit a multiplication operation between a source and destination location.
@@ -174,17 +188,27 @@ jz (LabIdent l) = emitInd $ "jz " ++ sanitiseAssembly l
 label :: EmitM m => LabIdent -> String -> m ()
 label (LabIdent l) comment_ = emit $ sanitiseAssembly l ++ ":" ++ comment comment_
 
--- Emit an address load operation for a compile-time string constant.
---   lea <constName c>(%rip), %<reg>
+
+lea :: EmitM m => Reg -> Int64 -> Reg -> Size -> Loc -> String -> m ()
+lea baseReg offset idxReg scale dest comment_ =
+    emitInd $ "lea " ++ complexPtr baseReg offset idxReg scale ++ ", " ++ loc Quadruple dest ++ comment comment_
+
+-- Emit an address load operation for a compile-time constant.
+--   lea <x>(%rip), %<reg>
 -- where <s> is the AT&T instruction suffix based on <size>.
-leaOfConst :: EmitM m => Const -> Reg -> m ()
-leaOfConst c dest =
-    emitInd $ "lea " ++ constName c ++ "(%rip), " ++ reg (reg64 dest)
+leaOfConst :: EmitM m => String -> Reg -> m ()
+leaOfConst x dest =
+    emitInd $ "lea " ++ sanitiseAssembly x ++ "(%rip), " ++ reg (reg64 dest)
 
 -- Emit a standard epilogue leave instruction
 -- that restores the rsp and rbp registers.
 leave :: EmitM m => m ()
 leave = emitInd "leave"
+
+-- Move the pointer to a constant into a location.
+--   movq $<i>, <loc>
+movConst :: EmitM m => LabIdent -> Reg -> m ()
+movConst (LabIdent i) reg_ = emitInd $ bin "mov" Quadruple (i ++ "(%rip)") (sizedReg Quadruple reg_) ""
 
 -- Emit a move from a source location to a register.
 --   mov<s> <src>, %<dest> # <comment>
@@ -199,9 +223,27 @@ movToReg size src dest comment_ =
 -- where <s> is the AT&T instruction suffix based on <size>.
 movToStack :: EmitM m => Size -> Loc -> Int64 -> String -> m ()
 movToStack size src stackDest comment_ = case src of
-    LocReg reg_ -> emitInd $ bin "mov" size (sizedReg size reg_) (stack stackDest) comment_
-    LocImm int  -> emitInd $ bin "mov" size (lit32 int) (stack stackDest) comment_
-    LocStack _  -> error "internal error. mov from stack to stack"
+    LocReg reg_   -> emitInd $ bin "mov" size (sizedReg size reg_) (stack stackDest) comment_
+    LocPtr src' _ -> movToStack size src' stackDest comment_
+    LocImm int    -> emitInd $ bin "mov" size (lit32 int) (stack stackDest) comment_
+    LocImm64 int  -> emitInd $ bin "mov" size (lit64 int) (stack stackDest) comment_
+    LocStack _    -> error "internal error. mov from stack to stack"
+
+-- Emit a move from a memory location pointed to by the value in the `ptrReg`
+-- offset by `ptrOffset` bytes to the destination register.
+--  mov<s> <ptrOffset>(%<ptrReg>), %<destReg> # <comment>
+-- where <s> is the AT&T instruction suffix based on <size>.
+movFromMemToReg :: EmitM m => Size -> Reg -> Int64 -> Reg -> String -> m ()
+movFromMemToReg size ptrReg ptrOffset destReg comment_ =
+    emitInd $ bin "mov" size (ptr ptrReg ptrOffset) (sizedReg size destReg) comment_
+
+-- Emit a move from a register to the memory location pointed to by the
+-- value in the `ptrReg` offset by `ptrOffset` bytes.
+--   mov<s> %<srcReg>, <ptrOffset>(%<ptrReg>)
+-- where <s> is the AT&T instruction suffix based on <size>.
+movFromRegToMem :: EmitM m => Size -> Reg -> Reg -> Int64 -> m ()
+movFromRegToMem size srcReg ptrReg ptrOffset =
+    emitInd $ bin "mov" size (sizedReg size srcReg) (ptr ptrReg ptrOffset) ""
 
 -- Emit a negation operation on a register.
 --   neg %<reg>
@@ -219,6 +261,11 @@ pop srcloc = emitInd $ "pop " ++ loc Quadruple srcloc
 --   push <loc>
 push :: EmitM m => Loc -> String -> m ()
 push srcloc comment_ = emitInd $ "push " ++ loc Quadruple srcloc ++ comment comment_
+
+-- Emit a definition of a quad value.
+--   .quad <s>
+quadDef :: EmitM m => String -> m ()
+quadDef s = emitInd $ ".quad " ++ sanitiseAssembly s
 
 -- Emit a ret instruction that ends the current function call.
 ret :: EmitM m => m ()
@@ -277,6 +324,7 @@ setle reg_ = emitInd $ "setle " ++ sizedReg Byte reg_
 --   setne %<reg>
 setne :: EmitM m => Reg -> m ()
 setne reg_ = emitInd $ "setne " ++ sizedReg Byte reg_
+
 -- Emit a subtraction operation between a source and destination location (dest - src).
 --   sub<s> <src>, <dest>
 -- where <s> is the AT&T instruction suffix based on <size>.
@@ -293,11 +341,11 @@ sub src dest =
 -- based on the result of a bitwise-and performed on the operands.
 -- The operands are considered for their lower 8 bytes only.
 --   testb <op1>, <op2>
-test :: EmitM m => Loc -> Loc -> m ()
-test op1 op2 =
-    let op1String = loc Byte op1
-        op2String = loc Byte op2
-    in emitInd $ bin "test" Byte op1String op2String ""
+test :: EmitM m => Size -> Loc -> Loc -> m ()
+test size op1 op2 =
+    let op1String = loc size op1
+        op2String = loc size op2
+    in emitInd $ bin "test" size op1String op2String ""
 
 -- Emit a xor operation between a source and destination location.
 -- Saves the result in the destination.
@@ -322,6 +370,16 @@ comment :: String -> String
 comment [] = []
 comment s  = ' ':'#':' ':s
 
+commentMultiline :: EmitM m => [String] -> m ()
+commentMultiline = emit . unlines . map comment
+
+complexPtr :: Reg -> Int64 -> Reg -> Size -> String
+complexPtr baseReg offset idxReg scale =
+    show offset ++ "("
+        ++ sizedReg Quadruple baseReg ++ ","
+        ++ sizedReg Quadruple idxReg ++ ","
+        ++ show (sizeInBytes scale) ++ ")"
+
 -- Emit an instruction indented by 2 spaces.
 emitInd :: EmitM m => String -> m ()
 emitInd s = emit ("  " ++ s)
@@ -329,6 +387,12 @@ emitInd s = emit ("  " ++ s)
 -- String representation of an integral literal.
 lit :: Int -> String
 lit n = '$':show n
+
+-- String representation of a memory access,
+-- where the base is located in the given register and is offset
+-- by the passed offset.
+ptr :: Reg -> Int64 -> String
+ptr r offset = show offset ++ "(" ++ sizedReg Quadruple r ++ ")"
 
 -- String representation of an integral literal.
 lit32 :: Int32 -> String
@@ -342,8 +406,10 @@ lit64 n = '$':show n
 loc :: Size -> Loc -> String
 loc size loc_ = case loc_ of
     LocReg r   -> sizedReg size r
+    LocPtr l _ -> loc size l
     LocStack n -> stack n
     LocImm n   -> lit32 n
+    LocImm64 n -> lit64 n
 
 -- String representation of a register (full 64-bits).
 reg :: String -> String

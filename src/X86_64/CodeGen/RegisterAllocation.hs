@@ -57,7 +57,9 @@ materialise val = do
     case loc of
         LocStack {} -> return loc
         LocReg {}   -> return loc
+        LocPtr {}   -> return loc
         LocImm {}   -> LocReg <$> moveToAnyReg val
+        LocImm64 {} -> LocReg <$> moveToAnyReg val
 
 -- Free the register while preserving alive values that had their only
 -- location set as this register. May cause spilling if no other registers
@@ -72,7 +74,7 @@ freeReg reg_ = do
         go vi = do
             secureValue vi
             varS <- getVarS vi
-            let varS' = varS {varLocs = filter (\r -> r /= LocReg reg_) (varLocs varS)}
+            let varS' = varS {varLocs = filter (\r -> not (isReg r) || asReg r /= reg_) (varLocs varS)}
             setVarS varS'
 
 -- Mark the register as reserved.
@@ -109,10 +111,34 @@ saveInReg vi reg_ = do
     freeReg reg_
     varS <- getVarS vi
     when (regReserved regS) (error $ "internal error. attempt to use a reserved register " ++ show reg_)
-    let varS' = varS {varLocs = LocReg reg_ : varLocs varS}
-        regS' = regS {regVals = varAliases varS}
-    setVarS varS'
+    let regS' = regS {regVals = varAliases varS}
+    forM_ (varAliases varS) updateVarS
     setRegS regS'
+    where
+        updateVarS vi' = do
+            varS <- getVarS vi'
+            let varS' = addLoc (LocReg reg_) varS
+            setVarS varS'
+
+-- Put the given variable into the location, replacing any values that were in it before.
+saveInLoc :: ValIdent -> Loc -> GenM ()
+saveInLoc vi loc = case loc of
+    LocPtr loc' _ -> saveInLoc vi loc'
+    LocReg reg_ -> saveInReg vi reg_
+    _ -> do
+        varS <- getVarS vi
+        case loc of
+            LocStack n -> do
+                s <- gets stack
+                let s' = stackInsert vi (Slot n (varSize varS)) s
+                setStack s'
+            _ -> return ()
+        forM_ (varAliases varS) updateVarS
+    where
+        updateVarS vi' = do
+            varS <- getVarS vi'
+            let varS' = addLoc loc varS
+            setVarS varS'
 
 -- Write all alive, yet unwritten locals persisted between blocks.
 saveBetweenBlocks :: GenM ()
@@ -134,16 +160,16 @@ saveOnStack vi = do
                 let (loc@(LocStack n), s') = stackInsertReserved vi s
                 reg_ <- moveToAnyReg (VVal () (varType varS) vi)
                 Emit.movToStack (varSize varS) (LocReg reg_) n ("save " ++ toStr vi)
-                return (varS {varLocs = loc : varLocs varS}, s')
+                return (addLoc loc varS, s')
         Nothing     -> return (varS, s)    -- Value is already on stack.
         Just srcLoc | stackIsValueReserved vi s -> do
             let (loc@(LocStack n), s') = stackInsertReserved vi s
             Emit.movToStack (varSize varS) srcLoc n ("save " ++ toStr vi )
-            return (varS {varLocs = loc : varLocs varS}, s')
+            return (addLoc loc varS, s')
         Just srcLoc -> do
             let (loc, s') = stackPush vi Quadruple s
             Emit.push srcLoc ("spill " ++ toStr vi)
-            return (varS {varLocs = loc : varLocs varS}, s')
+            return (addLoc loc varS, s')
     setVarS varS'
     setStack s'
 
@@ -174,24 +200,26 @@ rankReg regS =
                 Nothing ->
                        error $ "internal error. dead variable " ++ toStr vi ++ " in reg " ++ show (reg regS)
 
--- Move the value to the register removing any values currently in it.
+-- Move the value to the register removing any values currently in it if needed.
 moveToReg :: Val a -> Reg -> GenM ()
 moveToReg val reg_ = do
-    freeReg reg_
-    loc <- getValLoc val
-    let size = valSize val
-    comment <- case val of
-        VVal _ _ vi -> saveInReg vi reg_ >>
-            traceM' ("moving " ++ toStr vi ++ " to " ++ show reg_) >> return ("moving " ++ toStr vi)
-        _           -> return ""
-    Emit.movToReg size loc reg_ comment
+    locs <- getValLocs val
+    unless (LocReg reg_ `elem` locs) (do
+        freeReg reg_
+        loc <- getValLoc val
+        let size = valSize val
+        comment <- case val of
+            VVal _ _ vi -> saveInReg vi reg_ >>
+                traceM' ("moving " ++ toStr vi ++ " to " ++ show reg_) >> return ("moving " ++ toStr vi)
+            _           -> return ""
+        Emit.movToReg size loc reg_ comment)
 
 -- Move the address of a string constant to an unreserved register.
 moveConstToAnyReg :: Const -> GenM Reg
 moveConstToAnyReg c = do
     reg_ <- chooseReg
     freeReg reg_
-    Emit.leaOfConst c reg_
+    Emit.leaOfConst (constName c) reg_
     return reg_
 
 -- Move the value to any unreserved register if it is not already

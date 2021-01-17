@@ -1,5 +1,5 @@
 name:                Latte
-version:             0.9.1.0
+version:             0.10.0.0
 github:              "githubuser/Latte"
 license:             MIT
 author:              "Mateusz Gienieczko"
@@ -43,7 +43,7 @@ executables:
     ghc-options:
     - -threaded
     - -rtsopts
-    - -with-rtsopts=-N
+    - -with-rtsopts=-N2
     - -main-is Latc_x86_64
     - -Wall
     dependencies:
@@ -54,7 +54,7 @@ executables:
     ghc-options:
     - -threaded
     - -rtsopts
-    - -with-rtsopts=-N
+    - -with-rtsopts=-N2
     - -main-is Espi
     - -Wall
     dependencies:

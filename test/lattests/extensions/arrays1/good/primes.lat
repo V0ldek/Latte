@@ -1,0 +1,48 @@
+void set_all(boolean[] tab) {
+    int i = 0;
+    while (i < tab.length) {
+        tab[i] = true;
+        i++;
+    }
+}
+
+void run_sieve(boolean[] primes) {
+    int p = 2;
+    while (p < primes.length) {
+        if (primes[p]) {
+            int q = 2 * p;
+            while (q < primes.length) {
+                primes[q] = false;
+                q = q + p;
+            }
+        }
+        p++;
+    }
+}
+
+int main () {
+  int lastPrime = readInt();
+  boolean[] primes = new boolean[lastPrime + 1];
+
+  printString("Computing prime numbers below:");
+  printInt(primes.length);
+  
+  set_all(primes);
+  primes[0] = false;
+  primes[1] = false;
+  run_sieve(primes);
+  
+  int cnt = 0;
+  int i = 0;
+  
+  while (i <= lastPrime) {
+      if (primes[i]) {
+          cnt++;
+      }
+      i++;
+  }
+  printString("Found the following number of prime numbers:");
+  printInt(cnt);
+
+  return 0;
+}

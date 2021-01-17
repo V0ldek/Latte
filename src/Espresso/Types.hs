@@ -8,9 +8,8 @@ defaultVal :: SType a -> Val ()
 defaultVal t = case deref t of
     Int _   -> VInt () 0
     Bool _  -> VFalse ()
-    Str _   -> VNull ()
-    Cl _ _  -> VNull ()
-    Arr _ _ -> VNull ()
+    Cl _ _  -> VNull () (() <$ t)
+    Arr _ _ -> VNull () (() <$ t)
     _       -> error $ "defaultVal: invalid type " ++ show (() <$ t)
 
 deref :: SType a -> SType a
@@ -23,20 +22,25 @@ isInt t = case deref t of
     Int _ -> True
     _     -> False
 
+isRef :: SType a -> Bool
+isRef t = case t of
+    Ref {} -> True
+    _      -> False
+
 isStr :: SType a -> Bool
-isStr t = case deref t of
-    Str _ -> True
-    _     -> False
+isStr t = (() <$ deref t) == strType
+
+strType :: SType ()
+strType = Cl () (SymIdent "string")
 
 toSType :: Latte.Type a -> SType a
 toSType t = case t of
     Latte.Int a                -> Int a
-    Latte.Str a                -> Ref a (Str a)
     Latte.Bool a               -> Bool a
     Latte.Void a               -> Void a
     Latte.Var {}               -> error "toSType: not a simple type 'var'"
-    Latte.Arr a t'             -> Arr a (toSType t')
-    Latte.Cl a i               -> Cl a (toSymIdent i)
+    Latte.Arr a t'             -> Ref a (Arr a (toSType t'))
+    Latte.Cl a i               -> Ref a (Cl a (toSymIdent i))
     Latte.Fun{}                -> error "toSType: not a simple type Fun"
     Latte.Ref _ (Latte.Int a)  -> Int a
     Latte.Ref _ (Latte.Bool a) -> Bool a
@@ -53,5 +57,5 @@ valType val = case val of
     VNegInt a _ -> Int a
     VTrue a     -> Bool a
     VFalse a    -> Bool a
-    VNull {}    -> error "objects unimplemented - requires grammar change to include type info with nulls"
+    VNull a t   -> Ref a t
     VVal _ t _  -> t

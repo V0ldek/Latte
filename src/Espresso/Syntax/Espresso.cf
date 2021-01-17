@@ -6,7 +6,7 @@ token SymIdent (letter | '~') (letter | digit | '_' | '\'')* ;
 token LabIdent '.' 'L' '_' (letter | digit | '_' | '\'')* ;
 
 -- Values are %v_x, arguments are %a_x.
-token ValIdent '%' ('v' | 'a') '_' (letter | digit | '_' | '\'')* ;
+token ValIdent '%' ('v' | 'a') '_' (letter | digit | '_' | '~' | '\'')* ;
 
 QIdent. QIdent ::= SymIdent "." SymIdent ;
 
@@ -27,7 +27,6 @@ separator ClassDef "" ;
 FType. FType ::= SType "(" [SType] ")" ;
 
 Int.       SType ::= "int" ;
-Str.       SType ::= "string" ;
 Bool.      SType ::= "boolean" ;
 Void.      SType ::= "void" ;
 Arr.       SType ::= SType "[]" ;
@@ -53,12 +52,15 @@ IStr.      Instr ::= ValIdent ":=" String ";" ;
 IUnOp.     Instr ::= ValIdent ":=" UnOp Val ";" ;
 IVCall.    Instr ::= Call ";" ;
 ICall.     Instr ::= ValIdent ":=" Call ";" ;
+INew.      Instr ::= ValIdent ":=" "new" SType ";" ;
+INewArr.   Instr ::= ValIdent ":=" "newarr" SType "[" Val "]" ";" ;
 IJmp.      Instr ::= "jump" LabIdent ";" ;
 ICondJmp.  Instr ::= "jump" "if" Val "then" LabIdent "else" LabIdent ";" ;
 ILoad.     Instr ::= ValIdent ":=" "load" Val ";" ;
 IStore.    Instr ::= "store" Val Val ";" ;
 IFld.      Instr ::= ValIdent ":=" "fldptr" Val QIdent ";" ;
 IArr.      Instr ::= ValIdent ":=" "elemptr" Val "[" Val "]" ";" ;
+IArrLen.   Instr ::= ValIdent ":=" "arrlen" Val ";" ;
 IPhi.      Instr ::= ValIdent ":=" "phi" "(" [PhiVariant] ")" ";" ;
 
 PhiVar. PhiVariant ::= LabIdent ":" Val ;
@@ -74,7 +76,7 @@ VInt.    Val ::= Integer ;
 VNegInt. Val ::= "-" Integer ;
 VTrue.   Val ::= "true" ;
 VFalse.  Val ::= "false" ;
-VNull.   Val ::= "null" ;
+VNull.   Val ::= SType "null" ;
 VVal.    Val ::= SType ValIdent ;
 
 OpAdd. Op ::= "+" ;

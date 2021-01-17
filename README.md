@@ -1,4 +1,4 @@
-# Latte v0.9.1
+# Latte v0.10.0
 
 Compiler of the [Latte programming language](https://www.mimuw.edu.pl/~ben/Zajecia/Mrj2020/Latte/description.html) written in Haskell.
 
@@ -24,9 +24,10 @@ When running on a file `<p>.lat`, where `<p> = <dir_path/<file_path>` is some pa
 2. when `-g` is specified the following intermediate representations are generated additionally:
 
 - `<p>.esp`, `<p>.cfg` - Espresso intermediate code and text representation of its Control Flow Graph.
-- `<p>.1.opt.esp`, `<p>.1.opt.cfg` - Optimised Espresso code and its CFG.
-- `<p>.2.phi.esp`, `<p>.2.phi.cfg` - Optimised Espresso code with unfolded phony `phi` function usage and its CFG.
-- `<p>.3.liv.esp`, `<p>.3.liv.cfg` - Same code as above but with liveness annotations in form of comments on every instruction and the CFG with liveness annotations for the begin and end of each node.
+- `<p>.1.lin.esp`                  - Espresso with unreachable blocks removed.
+- `<p>.2.opt.esp`, `<p>.2.opt.cfg` - Optimised Espresso code and its CFG.
+- `<p>.3.phi.esp`, `<p>.3.phi.cfg` - Optimised Espresso code with unfolded phony `phi` function usage and its CFG.
+- `<p>.4.liv.esp`, `<p>.4.liv.cfg` - Same code as above but with liveness annotations in form of comments on every instruction and the CFG with liveness annotations for the begin and end of each node.
 - `<p>.noopt.s` - Generated assembly before peephole optimisation phase.
 
 ## Testing the project
@@ -49,17 +50,13 @@ These are quick to run but do not test anything related to x86_64 assembly gener
 - Internal IR language - Espresso - with a separate lexer/parser and a small interpreter.
 - Compilation to Espresso and generation of additional annotations - Control Flow Graph and variable liveness analysis.
 - x86_64 assembly code generation with register handling done locally via register/variable descriptions.
+- Support for arrays of integers, booleans or references to objects.
+- Support for objects with single inheritance and virtual methods.
 - Peephole optimisations of the generated assembly to fix common trivial inefficiencies.
-
-## Unimplemented extensions
-
-Objects, arrays and virtual methods are implemented in the static analysis phase, but not in Espresso or x86_64 codegen. These will be implemented in the next version of the compiler.
 
 ## Known issues
 
-1. The way strings work is currently inconsistent with how objects will work in general. For example, the compiler assumes a default value for a string is `null`, but there is no way to express a string `null` literal in Latte code (the grammar does not allow `(string) null`). One can achieve it by declaring an uninitialised string variable, as the default value for such variables is `null`. It is planned to change in the final version where `strings` will most likely be defined as actual object types with special handling for string literals.
-
-2. The generated code is wasteful when it comes to string literals. For example the code:
+1. The generated code is wasteful when it comes to string literals. For example the code:
 
 ```
 string x = "foo";
@@ -70,7 +67,7 @@ printString(z);
 
 causes three string allocations for each of the variables `x`, `y`, `z`. This is planned to change in the final version where constant propagation will be implemented.
 
-3. There is a slight issue with string allocation. Codegen for a string literal:
+2. There is a slight issue with string allocation. Codegen for a string literal:
 ```
 // Espresso code
 %v_0 := "literal";
@@ -95,7 +92,7 @@ call __cl_TopLevel.foo
 ```
 the indicated `mov` instruction is redundant. The compiler sees that %v_0 is alive after the `IStr` instruction (namely used in the call to `foo`) so it tries to preserve it through the call to `lat_new_string` (since `%r10` is caller-saved). This is wasteful, since the value inside `%r10` at that point is the address of the string literal constant, but the logical value of `%v_0` is the result of the call to `lat_new_string`. Fixing this is nontrivial, so it will be done if time permits for the next version.
 
-4. Conditional jumps where locals have to be persisted between blocks result in inefficient codegen. For example, the way a `<=` conditional is generated in Espresso is:
+3. Conditional jumps where locals have to be persisted between blocks result in inefficient codegen. For example, the way a `<=` conditional is generated in Espresso is:
 
 ```
 %v_cond := %v_0 <= %v_1;
@@ -131,7 +128,7 @@ but it is also useful as a language feature so it is exposed to the user.
 
 ## Runtime
 
-The runtime is small and contains the basic library functions `readInt`, `readString`, `printInt`, `printString` and `error` as well as internal core functions for string allocation and manipulation. It is written in C and included in `lib/runtime.c`. 
+The runtime is small and contains the basic library functions `readInt`, `readString`, `printInt`, `printString` and `error` as well as internal core functions for string allocation and manipulation, allocating objects and arrays. It is written in C and included in `lib/runtime.c`. 
 
 ## Compilation process
 
@@ -173,7 +170,7 @@ and not by user supplied source.
 
 Expressions that are computable at compile-time are rewritten during this phase into their result.
 This includes simple arithmetic expressions and relational operations that contain only constants
-as their atomic components.
+as their atomic components. No constant propagation done in this step.
 
 ### Phase two - top level metadata
 

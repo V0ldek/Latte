@@ -1,0 +1,4 @@
+ERROR
+Undefined base class `string`.
+Line 1, character 1:
+In definition of class `a`.

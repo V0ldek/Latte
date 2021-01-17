@@ -163,7 +163,6 @@ instance Unwrappable Item where
 
 data Type a
     = Int a
-    | Str a
     | Bool a
     | Void a
     | Var a
@@ -176,7 +175,6 @@ data Type a
 instance Functor Type where
     fmap f x = case x of
         Int a             -> Int (f a)
-        Str a             -> Str (f a)
         Bool a            -> Bool (f a)
         Void a            -> Void (f a)
         Var a             -> Var (f a)
@@ -188,7 +186,6 @@ instance Functor Type where
 instance Unwrappable Type where
     unwrap x = case x of
       Int a     -> a
-      Str a     -> a
       Bool a    -> a
       Void a    -> a
       Var a     -> a

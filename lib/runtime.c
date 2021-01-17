@@ -77,6 +77,54 @@ const lat_string *lat_new_string(const char *str, size_t len)
     return result;
 }
 
+void *lat_new_instance(size_t size)
+{
+    if (size < 8)
+    {
+        TERMINATE("internal error. invalid instance size %ld, must be at least 8 to hold the vtable pointer", size);
+    }
+
+    void *result = calloc(1, size);
+    CHK_SYSERR_VAL(result, NULL, "calloc")
+
+    return result;
+}
+
+void *lat_new_array(int32_t count, size_t size)
+{
+    if (size == 0)
+    {
+        TERMINATE("internal error. invalid instance size 0");
+    }
+    if (count <= 0)
+    {
+        TERMINATE("runtime error. non-positive array size.\n");
+    }
+
+    void *result;
+
+    if (size < 4)
+    {
+        if (4 % size != 0)
+        {
+            TERMINATE("internal error. element size does not divide 4");
+        }
+
+        size_t length_field_count = 4 / size;
+        result = calloc(count + length_field_count, size);
+    }
+    else
+    {
+        result = calloc(count + 1, size);
+    }
+
+    CHK_SYSERR_VAL(result, NULL, "calloc")
+    int32_t *length_field = result;
+    *length_field = count;
+
+    return result;
+}
+
 const lat_string *lat_read_string()
 {
     char *line = NULL;
@@ -99,11 +147,16 @@ void lat_error()
     TERMINATE("runtime error\n");
 }
 
+void lat_nullref() 
+{ 
+    TERMINATE("runtime error. attempt to dereference a null.\n");
+}
+
 void lat_nullchk(const void *ptr)
 {
     if (ptr == NULL)
     {
-        TERMINATE("runtime error. attempt to dereference a null.\n");
+        lat_nullref();
     }
 }
 

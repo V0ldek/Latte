@@ -28,8 +28,10 @@ data SemData = SemData {
   semReachable :: Reachability -- Reachability status at given place in the program.
 }
 
+data SymKind = SymNonSelf | SymSelfMethod | SymSelfField
+
 -- A declared symbol with a name and a type.
-data Symbol = Sym {symName :: Ident, symType :: Type (), symCode :: Maybe Code}
+data Symbol = Sym {symName :: Ident, symType :: Type (), symCode :: Maybe Code, symKind :: SymKind}
 
 -- Store of already analysed classes.
 type ClassStore = Map.Map Ident (Class SemData)
@@ -78,9 +80,9 @@ analyseCl cl = do
     Nothing -> do
       base <- mbAnalyseCl (clBase cl) -- Make sure base is analysed first so we can access
                                       -- its field and method symbols.
-      enterCl cl
+      when (clName cl /= topLevelClassIdent) (enterCl cl)
       mthds' <- mapM analyseMthd (clMethods cl)
-      exitCl
+      when (clName cl /= topLevelClassIdent) exitCl
       let cl' = cl {clBase = base, clMethods = mthds'}
       storeClass cl'
       return cl'
@@ -113,9 +115,9 @@ analyseBlk blk@(Block _ stmts) = do
 -- with its fields, methods and the 'self' symbol.
 enterCl :: Class a -> AnalyserM ()
 enterCl cl =
-  let fldSyms = map fldToSym (clFields cl)
-      mthdSyms = map mthdToSym (clMethods cl)
-      selfSym = Sym selfSymIdent (Cl () (clName cl)) undefined
+  let fldSyms = map (fldToSym SymSelfField) (clFields cl)
+      mthdSyms = map (mthdToSym SymSelfMethod) (Map.elems $ clMethods cl)
+      selfSym = Sym selfSymIdent (Cl () (clName cl)) Nothing SymNonSelf
    in do
         -- Note that methods are checked for type correctness when they are analysed,
         -- so here we only handle the fields.
@@ -154,7 +156,7 @@ enterMthd m = do
     pushSymTab
     -- The self symbol is added as part of enterCl, so we treat the method as if
     -- the induced first parameter did not exist.
-    addSym $ Sym currentMthdSymIdent (mthdTypeIgnSelf m) (Just $ mthdCode m)
+    addSym $ Sym currentMthdSymIdent (mthdTypeIgnSelf m) (Just $ mthdCode m) SymNonSelf
     addSyms argsSyms
     setReach (Reach True)
     where
@@ -162,7 +164,7 @@ enterMthd m = do
           unlessM (typeExists t) (nonexistentTypeError t a)
           when (isVoid t) (voidTypeExprError a)
           when (isVar t) (varArgError a)
-          return $ Sym i (Ref () $ () <$ t) (Just $ toCode a)
+          return $ Sym i (Ref () $ () <$ t) (Just $ toCode a) SymNonSelf
 
 -- Cleanup after analysing a method. Needs to analyse the return semantics
 -- and then pop the methods symbol table.
@@ -201,24 +203,8 @@ analyseStmt stmt = do
       unlessM (t2 `typeMatch` t1) (invTypeError expr2' t1 t2)
       semData <- analyseVoid stmt
       return $ Ass semData expr1' expr2'
-    Incr _ i -> do
-      mbSym <- getsSym (symTabLookup i)
-      case mbSym of
-        Nothing -> undeclError i stmt
-        Just sym -> do
-            let t = symType sym
-            unlessM (t `typeMatch` Int ()) (invTypeError stmt (Int ()) t)
-            semData <- analyseVoid stmt
-            return $ Incr semData i
-    Decr _ i -> do
-      mbSym <- getsSym (symTabLookup i)
-      case mbSym of
-        Nothing -> undeclError i stmt
-        Just sym -> do
-            let t = symType sym
-            unlessM (t `typeMatch` Int ()) (invTypeError stmt (Int ()) t)
-            semData <- analyseVoid stmt
-            return $ Decr semData i
+    Incr {} -> error "Incr should be rewritten"
+    Decr {} -> error "Decr should be rewritten"
     Ret _ expr -> do
       mthd <- getCurrentMthd
       expr' <- analyseExpr expr
@@ -279,7 +265,7 @@ analyseItemDecl t item = do
     Nothing -> case item of
       NoInit _ i' -> do
         when (isVar t) (varNoInitError item)
-        addSym (Sym i' (Ref () t) (Just $ unwrap item))
+        addSym (Sym i' (Ref () t) (Just $ unwrap item) SymNonSelf)
         semData <- analyseVoid item
         return $ NoInit semData i'
       Init _ i' expr -> do
@@ -287,7 +273,7 @@ analyseItemDecl t item = do
         let exprType = semType $ unwrap expr'
             t' = if isVar t then exprType else t -- Infer type to the compile-time type of the expression.
         unlessM (exprType `typeMatch` t) (invTypeError expr' t exprType)
-        addSym (Sym i' (Ref () t') (Just $ unwrap item))
+        addSym (Sym i' (Ref () t') (Just $ unwrap item) SymNonSelf)
         semData <- analyseVoid item
         return $ Init semData i' expr'
     Just sym -> conflDeclError item sym
@@ -304,12 +290,15 @@ analyseExpr srcExpr = case srcExpr of
             Nothing -> undeclError i srcExpr
             Just sym -> do
                 semData <- analyseTyped srcExpr (symType sym)
-                return $ EVar semData i
+                return $ case symKind sym of
+                  SymNonSelf    -> EVar semData i
+                  SymSelfField  -> EAcc semData (EVar semData selfSymIdent) i
+                  SymSelfMethod -> EAcc semData (EVar semData selfSymIdent) i
     ELitInt _ n           -> do
         semData <- analyseTyped srcExpr (Int ())
         return $ ELitInt semData n
     EString _ s           -> do
-        semData <- analyseTyped srcExpr (Str ())
+        semData <- analyseTyped srcExpr (Ref () $ Cl () $ Ident "string")
         return $ EString semData s
     ELitTrue _            -> do
         semData <- analyseTyped srcExpr (Bool ())
@@ -450,7 +439,7 @@ isTriviallyFalse expr = case expr of
 topLevelSymTab :: Metadata a -> SymbolTable
 topLevelSymTab (Meta cls) =
   let topLevelCl = cls Map.! topLevelClassIdent
-      topLevelSyms = map mthdToSym (clMethods topLevelCl) ++ nativeTopLevelSymbols
+      topLevelSyms = map (mthdToSym SymNonSelf) (Map.elems $ clMethods topLevelCl) ++ nativeTopLevelSymbols
    in SymTab (Map.fromList $ map (\s -> (symName s, s)) topLevelSyms) Nothing
 
 -- Annotate the piece of syntax with semantic data according to current state and a Void type.
@@ -538,12 +527,12 @@ getCurrentMthd :: AnalyserM Symbol
 getCurrentMthd = getsSym (symTabGet currentMthdSymIdent)
 
 -- Convert field metadata into a symbol.
-fldToSym :: Field -> Symbol
-fldToSym fld = Sym (fldName fld) (Ref () $ fldType fld) (Just $ toCode $ fldCode fld)
+fldToSym :: SymKind -> Field -> Symbol
+fldToSym k fld = Sym (fldName fld) (Ref () $ fldType fld) (Just $ toCode $ fldCode fld) k
 
 -- Convert method metadata into a symbol.
-mthdToSym :: Method a -> Symbol
-mthdToSym m = Sym (mthdName m) (mthdTypeIgnSelf m) (Just $ mthdCode m)
+mthdToSym :: SymKind -> Method a -> Symbol
+mthdToSym k m = Sym (mthdName m) (mthdTypeIgnSelf m) (Just $ mthdCode m) k
 
 -- Check if a given type is declared in the metadata.
 typeExists :: Type a -> AnalyserM Bool
@@ -569,7 +558,6 @@ isVar t = case deref t of
 typeMatch :: Type a -> Type b -> AnalyserM Bool
 typeMatch t1 t2 = case (deref t1, deref t2) of
   (Int _, Int _)         -> return True
-  (Str _, Str _)         -> return True
   (Bool _, Bool _)       -> return True
   (Void _, Void _)       -> return True
   (_, Var _)             -> return True
@@ -590,9 +578,9 @@ typeMatch t1 t2 = case (deref t1, deref t2) of
 -- Does the language support addition of expressions of given types.
 areAddTypes :: Type a -> Type b -> Bool
 areAddTypes t1 t2 = case (deref t1, deref t2) of
-  (Int _, Int _) -> True
-  (Str _, Str _) -> True
-  _              -> False
+  (Int _, Int _)                                 -> True
+  (Cl _ (Ident "string"), Cl _ (Ident "string")) -> True
+  _                                              -> False
 
 -- Does the language support subtraction of expressions of given types.
 areMinTypes :: Type a -> Type b -> Bool
@@ -608,7 +596,6 @@ areEqTypes t1 t2 = liftM2 (||) (t1 `typeMatch` t2 ) (t2 `typeMatch` t1)
 areCmpTypes :: Type a -> Type b -> Bool
 areCmpTypes t1 t2 = case (deref t1, deref t2) of
   (Int _, Int _)   -> True
-  (Str _, Str _)   -> True
   (Bool _, Bool _) -> True
   _                -> False
 
@@ -624,8 +611,8 @@ classMatch cl1 cl2 =
 -- If access is impossible due to whatever reason, the monad will fail with a suitable error.
 accessMember :: (Positioned a, Error.WithContext a, Unwrappable f) => Type () -> Ident -> f a -> AnalyserM Symbol
 accessMember t i ctx = case t of
-  Arr _ _ -> if i == arrayLengthIdent then return $ Sym arrayLengthIdent (Int ()) undefined
-                                    else invAccessError t i ctx
+  Arr _ _ -> if i == arrayLengthIdent then return $ Sym arrayLengthIdent (Int ()) Nothing SymNonSelf
+                                      else invAccessError t i ctx
   Cl _ cli  -> do
     mcl <- asksCl cli
     case mcl of
@@ -633,8 +620,8 @@ accessMember t i ctx = case t of
       Just cl -> let fld = find (\f -> fldName f == i) (clFields cl)
                      mthd = find (\m -> mthdName m == i) (clMethods cl)
                  in case (fld, mthd) of
-                      (Just fld', _)     -> return $ fldToSym fld'
-                      (_, Just mthd')    -> return $ mthdToSym mthd'
+                      (Just fld', _)     -> return $ fldToSym SymNonSelf fld'
+                      (_, Just mthd')    -> return $ mthdToSym SymNonSelf mthd'
                       (Nothing, Nothing) -> invAccessError t i ctx
   Ref _ t' -> accessMember t' i ctx
   _       -> invAccessError t i ctx
@@ -657,11 +644,11 @@ deref t = case t of
 -- Symbols that are linked from the native library.
 nativeTopLevelSymbols :: [Symbol]
 nativeTopLevelSymbols = [printInt, printString, error_, readInt, readString]
-    where printInt = Sym (Ident "printInt") (Fun () (Void ()) [Int ()]) Nothing
-          printString = Sym (Ident "printString") (Fun () (Void ()) [Str ()]) Nothing
-          error_ = Sym (Ident "error") (Fun () (Void ()) []) Nothing
-          readInt = Sym (Ident "readInt") (Fun () (Int ()) []) Nothing
-          readString = Sym (Ident "readString") (Fun () (Str ()) []) Nothing
+    where printInt = Sym (Ident "printInt") (Fun () (Void ()) [Int ()]) Nothing SymNonSelf
+          printString = Sym (Ident "printString") (Fun () (Void ()) [Ref () $ Cl () $ Ident "string"]) Nothing SymNonSelf
+          error_ = Sym (Ident "error") (Fun () (Void ()) []) Nothing SymNonSelf
+          readInt = Sym (Ident "readInt") (Fun () (Int ()) []) Nothing SymNonSelf
+          readString = Sym (Ident "readString") (Fun () (Ref () $ Cl () $ Ident "string") []) Nothing SymNonSelf
 
 -- Errors
 

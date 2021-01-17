@@ -4,7 +4,7 @@ module X86_64.Size where
 import           Data.Int
 import           Espresso.Syntax.Abs
 
-data Size = Byte | Double | Quadruple deriving (Eq, Show)
+data Size = Byte | Double | Quadruple deriving (Eq, Show, Ord)
 
 sizeInBytes :: Size -> Int64
 sizeInBytes size = case size of
@@ -17,7 +17,7 @@ typeSize t = case t of
     Int _   -> Double
     Bool _  -> Byte
     Ref _ _ -> Quadruple
-    _       -> error "typeSize: invalid type"
+    _       -> error $ "typeSize: invalid type " ++ show (() <$ t)
 
 valSize :: Val a -> Size
 valSize val = case val of
@@ -25,5 +25,5 @@ valSize val = case val of
     VNegInt _  _ -> Double
     VTrue _      -> Byte
     VFalse _     -> Byte
-    VNull _      -> Quadruple
+    VNull {}     -> Quadruple
     VVal _ t _   -> typeSize t

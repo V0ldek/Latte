@@ -1,0 +1,6 @@
+int main () {
+    int[] tab = new int[42];
+    tab.length = 43;
+   
+    return 0;
+}
