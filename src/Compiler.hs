@@ -9,8 +9,10 @@ import           Espresso.ControlFlow.CFG
 import           Espresso.ControlFlow.Liveness      (Liveness, analyseLiveness,
                                                      emptyLiveness)
 import           Espresso.ControlFlow.Phi           (unfoldPhi)
+import           Espresso.ControlFlow.SSA
 import           Espresso.Optimisation.CFGTransform (inlineTrivialBlocks,
                                                      removeUnreachable)
+import           Espresso.Optimisation.Pipeline
 import qualified Espresso.Syntax.Abs                as Esp
 import           Espresso.Syntax.Printer            as PrintEsp (Print,
                                                                  printTree,
@@ -62,34 +64,55 @@ run opt = do
     latSrc <- LatteIO.readFile $ inputFile opt
     printStringV v "Analysing Latte..."
     latte <- analysePhase opt latSrc
+
+    let espresso@(Esp.Program _ meta mthds) = generateEspresso latte
+        cfgs = zip (map cfg mthds) mthds
+        cfgsLin = map (uncurry removeUnreachable) cfgs
+        cfgsWithLiveness = map (first analyseLiveness) cfgsLin
+        ssaCode = map (\(g, mthd) -> (transformToSSA g mthd, mthd)) cfgsWithLiveness
+        optimisedCode = map (\(ssa, mthd) -> (optimise ssa mthd, mthd)) ssaCode
+        unfoldedPhiCode = zip (map (unfoldPhi . first unwrapSSA) optimisedCode) mthds
+        optimisedCfgs = map (\(cfg_, mthd) -> removeUnreachable (inlineTrivialBlocks cfg_) mthd) unfoldedPhiCode
+        optimisedWithLiveness = map (first analyseLiveness) optimisedCfgs
     printStringV v "Brewing Espresso..."
-    let espresso@(Esp.Program a meta mthds) = generateEspresso latte
-    genStep opt (espressoFile directory fileName) (PrintEsp.printTree espresso)
+    genStep opt (espressoFile directory fileName <.> "esp") (PrintEsp.printTree espresso)
     printStringV v "Building CFGs..."
-    let cfgs = zip (map cfg mthds) mthds
-        espressoOpt = PrintEsp.printTree $ Esp.Program a meta (cfgsToMthds () cfgs)
-    genStep opt (espressoCfgFile directory fileName) (showCfgs cfgs)
-    genStep opt (espressoWithoutDeadFile directory fileName) espressoOpt
-    printStringV v "Unfolding phis..."
-    let cfgsWithUnfoldedPhi = zip (map unfoldPhi cfgs) mthds
-        espressoWithUnfoldedPhi = PrintEsp.printTree $ Esp.Program () meta (cfgsToMthds () cfgsWithUnfoldedPhi)
-    genStep opt (espressoCfgWithUnfoldedPhiFile directory fileName) (showCfgs cfgsWithUnfoldedPhi)
-    genStep opt (espressoWithUnfoldedPhiFile directory fileName) espressoWithUnfoldedPhi
-    printStringV v "Optimising Espresso..."
-    let optimisedCfgs = map (\(cfg_, mthd) -> removeUnreachable (inlineTrivialBlocks cfg_) mthd) cfgsWithUnfoldedPhi
-        optimisedEspresso = PrintEsp.printTree $ Esp.Program () meta (cfgsToMthds () optimisedCfgs)
-    genStep opt (espressoOptimisedCfgFile directory fileName) (showCfgs optimisedCfgs)
-    genStep opt (espressoOptimisedFile directory fileName) optimisedEspresso
-    printStringV v "Analysing liveness..."
-    let cfgsWithLiveness = map (first analyseLiveness) optimisedCfgs
-        espressoWithLiveness = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgsWithLiveness)
-    genStep opt (espressoCfgWithLivenessFile directory fileName) (showCfgsWithLiveness cfgsWithLiveness)
-    genStep opt (espressoWithLivenessFile directory fileName) espressoWithLiveness
+    genStep opt (espressoFile directory fileName <.> "cfg") (showCfgs cfgs)
+    genEspStep opt reachableEspressoFile meta cfgsLin "Removing unreachable blocks..."
+    genEspWithLivenessStep opt livenessEspressoFile meta cfgsWithLiveness "Analysing liveness..."
+    genEspStep opt ssaEspressoFile meta (map (first unwrapSSA) ssaCode) "Transforming to SSA..."
+    genEspStep opt optimisedEspressoFile meta (map (first unwrapSSA) optimisedCode) "Optimising Espresso..."
+    genEspStep opt unfoldedPhiEspressoFile meta unfoldedPhiCode "Unfolding phis..."
+    genEspStep opt finalEspressoFile meta optimisedCfgs "Inlining trivial jumps..."
+    genEspWithLivenessStep opt finalLivenessEspressoFile meta optimisedWithLiveness "Reanalysing liveness..."
+
     printStringV v "Generating x86_64 assembly..."
-    let assembly = generate meta cfgsWithLiveness
+    let assembly = generate meta optimisedWithLiveness
     genStep opt (unoptAssemblyFile directory fileName) assembly
     let optAssembly = unlines $ Peephole.optimise (lines assembly)
     genOutput opt (assemblyFile directory fileName) optAssembly
+
+genEspStep :: (Monad m, LatteIO m) => Options -> (FilePath -> FilePath -> FilePath) -> Esp.Metadata () -> [(CFG (), Esp.Method ())] -> String -> m ()
+genEspStep opt fp meta cfgs comment = do
+    let f = inputFile opt
+        v = verbosity opt
+        fileName = dropExtension $ takeFileName f
+        directory = takeDirectory f
+        esp = PrintEsp.printTree $ Esp.Program () meta (cfgsToMthds () cfgs)
+    printStringV v comment
+    genStep opt (fp directory fileName  <.> "cfg") (showCfgs cfgs)
+    genStep opt (fp directory fileName  <.> "esp") esp
+
+genEspWithLivenessStep :: (Monad m, LatteIO m) => Options -> (FilePath -> FilePath -> FilePath) -> Esp.Metadata () -> [(CFG Liveness, Esp.Method ())] -> String -> m ()
+genEspWithLivenessStep opt fp meta cfgs comment = do
+    let f = inputFile opt
+        v = verbosity opt
+        fileName = dropExtension $ takeFileName f
+        directory = takeDirectory f
+        esp = showEspWithLiveness meta (cfgsToMthds emptyLiveness cfgs)
+    printStringV v comment
+    genStep opt (fp directory fileName <.> "cfg") (showCfgsWithLiveness cfgs)
+    genStep opt (fp directory fileName <.> "esp") esp
 
 analysePhase :: (Monad m, LatteIO m) => Options -> String -> m (Metadata SemData)
 analysePhase opt latSrc = do
@@ -152,13 +175,13 @@ showTree :: (Monad m, LatteIO m, Show a, PrintLatte.Print a) => Verbosity -> a -
 showTree v tree
  = do
       printStringV v $ "\n[Abstract Syntax]\n\n" ++ show tree
-      printStringV v $ "\n[Linearized tree]\n\n" ++ PrintLatte.printTree tree
+      printStringV v $ "\n[linearised tree]\n\n" ++ PrintLatte.printTree tree
 
 showEspTree :: (Monad m, LatteIO m, Show a, PrintEsp.Print a) => Verbosity -> a -> m ()
 showEspTree v tree
  = do
       printStringV v $ "\n[Abstract Syntax]\n\n" ++ show tree
-      printStringV v $ "\n[Linearized tree]\n\n" ++ PrintEsp.printTree tree
+      printStringV v $ "\n[linearised tree]\n\n" ++ PrintEsp.printTree tree
 
 showCfgs :: [(CFG a, Esp.Method a)] -> String
 showCfgs cfgs = unlines $ map showCfg cfgs
@@ -168,7 +191,7 @@ showCfgs cfgs = unlines $ map showCfg cfgs
 
 cfgsToMthds ::  a -> [(CFG a, Esp.Method b)] -> [Esp.Method a]
 cfgsToMthds default_ = map (\(g, Esp.Mthd _ r i ps _) ->
-    Esp.Mthd default_ (default_ <$ r) (default_ <$ i) (map (default_ <$) ps) (linearize g))
+    Esp.Mthd default_ (default_ <$ r) (default_ <$ i) (map (default_ <$) ps) (linearise g))
 
 showCfgsWithLiveness :: [(CFG Liveness, Esp.Method a)] -> String
 showCfgsWithLiveness cfgs = unlines $ map showCfg cfgs
@@ -189,28 +212,25 @@ unoptAssemblyFile :: FilePath -> FilePath -> FilePath
 unoptAssemblyFile dir file = dir </> file <.> "noopt" <.> "s"
 
 espressoFile :: FilePath -> FilePath -> FilePath
-espressoFile dir file = dir </> file <.> "esp"
+espressoFile dir file = dir </> file
 
-espressoCfgFile :: FilePath -> FilePath -> FilePath
-espressoCfgFile dir file = dir </> file <.> "cfg"
+reachableEspressoFile :: FilePath -> FilePath -> FilePath
+reachableEspressoFile dir file = dir </> file <.> "1" <.> "reach"
 
-espressoWithoutDeadFile :: FilePath -> FilePath -> FilePath
-espressoWithoutDeadFile dir file = dir </> file <.> "1" <.> "lin" <.> "esp"
+livenessEspressoFile :: FilePath -> FilePath -> FilePath
+livenessEspressoFile dir file = dir </> file <.> "2" <.> "liv"
 
-espressoCfgWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
-espressoCfgWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "cfg"
+ssaEspressoFile :: FilePath -> FilePath -> FilePath
+ssaEspressoFile dir file = dir </> file <.> "3" <.> "ssa"
 
-espressoWithUnfoldedPhiFile :: FilePath -> FilePath -> FilePath
-espressoWithUnfoldedPhiFile dir file = dir </> file <.> "2" <.> "phi" <.> "esp"
+optimisedEspressoFile :: FilePath -> FilePath -> FilePath
+optimisedEspressoFile dir file = dir </> file <.> "4" <.> "opt"
 
-espressoOptimisedCfgFile :: FilePath -> FilePath -> FilePath
-espressoOptimisedCfgFile dir file = dir </> file <.> "3" <.> "opt" <.> "cfg"
+unfoldedPhiEspressoFile :: FilePath -> FilePath -> FilePath
+unfoldedPhiEspressoFile dir file = dir </> file <.> "5" <.> "nophi"
 
-espressoOptimisedFile :: FilePath -> FilePath -> FilePath
-espressoOptimisedFile dir file = dir </> file <.> "3" <.> "opt" <.> "esp"
+finalEspressoFile :: FilePath -> FilePath -> FilePath
+finalEspressoFile dir file = dir </> file <.> "6" <.> "final"
 
-espressoCfgWithLivenessFile :: FilePath -> FilePath -> FilePath
-espressoCfgWithLivenessFile dir file = dir </> file <.> "4" <.> "liv" <.> "cfg"
-
-espressoWithLivenessFile :: FilePath -> FilePath -> FilePath
-espressoWithLivenessFile dir file = dir </> file <.> "4" <.> "liv" <.> "esp"
+finalLivenessEspressoFile :: FilePath -> FilePath -> FilePath
+finalLivenessEspressoFile dir file = dir </> file <.> "7" <.> "final" <.> "liv"

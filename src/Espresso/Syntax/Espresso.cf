@@ -1,7 +1,7 @@
 entrypoints Program ;
 
--- Override Ident definition to allow leading '~' for internal names.
-token SymIdent (letter | '~') (letter | digit | '_' | '\'')* ;
+-- Override Ident definition to allow '~' for internal names.
+token SymIdent (letter | '~') (letter | digit | '_' | '~' | '\'')* ;
 
 token LabIdent '.' 'L' '_' (letter | digit | '_' | '\'')* ;
 

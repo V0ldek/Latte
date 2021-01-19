@@ -6,7 +6,9 @@ module Espresso.ControlFlow.CFG (
     CFG(..),
     Node(..),
     cfg,
-    linearize,
+    linearise,
+    linearMap,
+    lineariseNodes,
     nodeHead,
     nodeTail
 ) where
@@ -43,17 +45,18 @@ cfg (Mthd _ _ _ _ instrs) =
         initial = Map.fromList $ map (\(l, is) -> (l, Node l is Set.empty Set.empty)) basicBlocks
     in  execState (construct basicBlocks) (CFG initial)
 
--- Convert a CFG to a sequence of instructions. It is guaranteed to start with the
--- .L_entry block. Blocks that are unreachable from the entry block will be ignored.
-linearize :: CFG a -> [Instr a]
-linearize (CFG g) =
+linearMap :: (Node a -> Node b) -> CFG a -> CFG b
+linearMap f g = CFG (Map.fromList $ map (\n -> (nodeLabel n, f n)) $ lineariseNodes g)
+
+lineariseNodes :: CFG a -> [Node a]
+lineariseNodes (CFG g) =
     case Map.lookup entryLabel g of
         Just entry -> evalState (go entry) Set.empty
         Nothing    -> error "internal error. malformed graph, no entry label"
     where
         go node = do
             rest <- mapM expand (Set.elems $ nodeOut node)
-            return $ nodeCode node ++ concat rest
+            return $ node : concat rest
         expand l = do
             case Map.lookup l g of
                 Just node -> do
@@ -62,6 +65,11 @@ linearize (CFG g) =
                         modify (Set.insert l)
                         go node
                 Nothing -> error $ "internal error. malformed graph, no " ++ toStr l ++ " node"
+
+-- Convert a CFG to a sequence of instructions. It is guaranteed to start with the
+-- .L_entry block. Blocks that are unreachable from the entry block will be ignored.
+linearise :: CFG a -> [Instr a]
+linearise = concatMap nodeCode . lineariseNodes
 
 -- Extract the element from the first instruction in the block.
 nodeHead :: Node a -> a
@@ -117,12 +125,6 @@ instance Show (CFG a) where
     show (CFG g) = unlines (nodes:map edges (Map.elems g))
         where nodes = show (map toStr $ Map.keys g)
               edges node = show (toStr $ nodeLabel node) ++ " -> " ++ show (nodeOut node)
-
-isLabel :: Instr a -> Bool
-isLabel instr = case instr of
-  ILabel {}    -> True
-  ILabelAnn {} -> True
-  _            -> False
 
 isJump :: Instr a -> Bool
 isJump instr = case instr of

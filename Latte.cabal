@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 13ed02537ed77fc976e56d15e2cbed102f054855cae2501059865c0076828221
+-- hash: fa4825cef3257b7d0c9a5668c5473858eed38fe0eb12b6582bd31a693e36c160
 
 name:           Latte
 version:        0.10.0.0
@@ -37,8 +37,13 @@ library
       Espresso.ControlFlow.CFG
       Espresso.ControlFlow.Liveness
       Espresso.ControlFlow.Phi
+      Espresso.ControlFlow.SSA
       Espresso.Interpreter
       Espresso.Optimisation.CFGTransform
+      Espresso.Optimisation.CommonSubexpressions
+      Espresso.Optimisation.DeadCode
+      Espresso.Optimisation.Pipeline
+      Espresso.Optimisation.Propagation
       Espresso.Syntax.Abs
       Espresso.Syntax.Lexer
       Espresso.Syntax.Parser
@@ -70,6 +75,9 @@ library
       X86_64.CodeGen.Stack
       X86_64.Loc
       X86_64.Optimisation.Peephole
+      X86_64.RegisterAllocation.InterferenceGraph
+      X86_64.RegisterAllocation.RandomSequence
+      X86_64.RegisterAllocation.SequenceColouring
       X86_64.Registers
       X86_64.Size
   other-modules:
@@ -83,10 +91,13 @@ library
     , containers >=0.6 && <0.7
     , directory >=1.3 && <1.4
     , filepath >=1.4 && <1.5
+    , hashable >=1.3 && <1.4
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , random >=1.1 && <1.2
     , regex >=1.1 && <1.2
+    , unordered-containers >=0.2 && <0.3
   default-language: Haskell2010
 
 executable espi
@@ -104,10 +115,13 @@ executable espi
     , containers >=0.6 && <0.7
     , directory >=1.3 && <1.4
     , filepath >=1.4 && <1.5
+    , hashable >=1.3 && <1.4
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , random >=1.1 && <1.2
     , regex >=1.1 && <1.2
+    , unordered-containers >=0.2 && <0.3
   default-language: Haskell2010
 
 executable latc_x86_64
@@ -125,10 +139,13 @@ executable latc_x86_64
     , containers >=0.6 && <0.7
     , directory >=1.3 && <1.4
     , filepath >=1.4 && <1.5
+    , hashable >=1.3 && <1.4
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , random >=1.1 && <1.2
     , regex >=1.1 && <1.2
+    , unordered-containers >=0.2 && <0.3
   default-language: Haskell2010
 
 test-suite Latte-exec-test
@@ -146,10 +163,13 @@ test-suite Latte-exec-test
     , containers >=0.6 && <0.7
     , directory >=1.3 && <1.4
     , filepath >=1.4 && <1.5
+    , hashable >=1.3 && <1.4
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , random >=1.1 && <1.2
     , regex >=1.1 && <1.2
+    , unordered-containers >=0.2 && <0.3
   default-language: Haskell2010
 
 test-suite Latte-test
@@ -157,6 +177,7 @@ test-suite Latte-test
   main-is: Spec.hs
   other-modules:
       Compiler.CompilerSpec
+      Compiler.SSA
       Espresso.InterpreterSpec
       Paths_Latte
   hs-source-dirs:
@@ -169,8 +190,11 @@ test-suite Latte-test
     , containers >=0.6 && <0.7
     , directory >=1.3 && <1.4
     , filepath >=1.4 && <1.5
+    , hashable >=1.3 && <1.4
     , hspec >=2.7 && <2.8
     , mtl >=2.2 && <2.3
     , process >=1.6 && <1.7
+    , random >=1.1 && <1.2
     , regex >=1.1 && <1.2
+    , unordered-containers >=0.2 && <0.3
   default-language: Haskell2010

@@ -6,21 +6,24 @@ module  X86_64.CodeGen.Generator (generate) where
 
 import           Control.Monad.Reader
 import           Control.Monad.State
-import           Data.Bifunctor                    (Bifunctor (second))
+import           Data.Bifunctor                              (Bifunctor (second))
 import           Data.Int
-import           Data.List                         (partition)
-import qualified Data.Map                          as Map
-import qualified Data.Set                          as Set
-import           Espresso.ControlFlow.CFG          (CFG (..), Node (..))
+import           Data.List                                   (partition)
+import qualified Data.Map                                    as Map
+import qualified Data.Set                                    as Set
+import           Espresso.ControlFlow.CFG                    (CFG (..),
+                                                              Node (..))
 import           Espresso.ControlFlow.Liveness
 import           Espresso.Syntax.Abs
-import           Espresso.Types                    (deref, isInt, isStr,
-                                                    valType, strType)
+import           Espresso.Types                              (deref, isInt,
+                                                              isStr, strType,
+                                                              valType)
 import           Identifiers
-import           Utilities                         (isPowerOfTwo, log2, single)
+import           Utilities                                   (isPowerOfTwo,
+                                                              log2, single)
 import           X86_64.Class
 import           X86_64.CodeGen.Consts
-import qualified X86_64.CodeGen.Emit               as Emit
+import qualified X86_64.CodeGen.Emit                         as Emit
 import           X86_64.CodeGen.Epilogue
 import           X86_64.CodeGen.GenM
 import           X86_64.CodeGen.Module
@@ -28,6 +31,9 @@ import           X86_64.CodeGen.Prologue
 import           X86_64.CodeGen.RegisterAllocation
 import           X86_64.CodeGen.Stack
 import           X86_64.Loc
+import           X86_64.RegisterAllocation.InterferenceGraph
+import           X86_64.RegisterAllocation.RandomSequence
+import           X86_64.RegisterAllocation.SequenceColouring
 import           X86_64.Registers
 import           X86_64.Size
 
@@ -38,13 +44,18 @@ generate (Meta () clDefs) mthds =
     where
     cls = map compileClass clDefs
     clMap = Map.fromList $ map (\cl -> (clName cl, cl)) cls
-    go (cfg@(CFG g), Mthd _ _ qi ps _) (xs, cs) =
+    go (cfg@(CFG g), m@(Mthd _ _ qi ps _)) (xs, cs) =
         let initStack = stackReserve (map (second typeSize) locals) stackEmpty
             initState = St [] [] cs initStack Set.empty initialRegs Map.empty Map.empty 0
             st = runReader (execStateT goOne initState) (Env (labelFor qi) emptyLiveness clMap)
             rawMthd = CmpMthd (toStr $ labelFor qi entryLabel) [] (reverse $ allCode st) []
+            interferenceGraph = buildInterferenceGraph cfg m
+            interferenceComment = Emit.emitAsString $ Emit.commentMultiline ("Interference graph:":lines (show interferenceGraph))
+            coloured = sequenceColouring (randomSequence interferenceGraph) interferenceGraph
+            colouredInterferenceComment = Emit.emitAsString $ Emit.commentMultiline ("Coloured interference graph:":lines (show coloured))
             mthd = withEpilogue st $ withPrologue qi st rawMthd
-        in (mthd:xs, consts st)
+            mthd' = mthd {mthdPrologue = interferenceComment : colouredInterferenceComment : mthdPrologue mthd}
+        in (mthd':xs, consts st)
         where
             goOne = do
                 traceM' ("========== starting method: " ++ toStr (labelFor qi (LabIdent "")))

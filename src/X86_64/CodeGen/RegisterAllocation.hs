@@ -188,7 +188,7 @@ rankReg regS =
       then return $ Free (regType $ reg regS)
       else do
         l <- gets live
-        let nextUse = minimum $ map (getValUse l) (regVals regS)
+        let nextUse = minimum $ map (fst . getValUse l) (regVals regS)
         varSs <- mapM getVarS (regVals regS)
         return $ if all (any isStack . varLocs) varSs
                    then Clean nextUse

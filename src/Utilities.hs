@@ -76,7 +76,17 @@ fixpoint = fixpointBy id
 -- Iterate function until reaching a fixpoint
 -- as determined by the equality on the ordering map.
 fixpointBy :: (Eq b) => (a -> b) -> (a -> a) -> a -> a
-fixpointBy ord f x = let x' = f x in if ord x == ord x' then x else fixpointBy ord f x'
+fixpointBy ord f x = let x' = f x in if ord x == ord x' then x' else fixpointBy ord f x'
+
+fixpointM :: (Monad m, Eq a) => (a -> m a) -> a -> m a
+fixpointM = fixpointByM id
+
+fixpointByM :: (Monad m, Eq b) => (a -> b) -> (a -> m a) -> a -> m a
+fixpointByM ord f x = do
+    x' <- f x
+    if ord x == ord x'
+      then return x'
+      else fixpointByM ord f x'
 
 splitLast :: [a] -> (a, [a])
 splitLast [] = error "empty"

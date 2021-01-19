@@ -15,7 +15,7 @@ data ExecTest = Test {testName :: String, testPath :: FilePath}
 -- If True, the workdir is removed after execution ends.
 -- Set to False to inspect the compiler output when tests fail.
 cleanupEnabled :: Bool
-cleanupEnabled = True
+cleanupEnabled = False
 
 main :: IO ()
 main = do

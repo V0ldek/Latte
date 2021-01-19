@@ -1,6 +1,8 @@
 module Compiler.CompilerSpec (spec) where
 
 import           Compiler
+import           Compiler.SSA
+import           Control.Monad
 import           Data.List
 import           Data.Maybe
 import           ErrM                   (toEither)
@@ -59,56 +61,35 @@ spec = parallel $ do
         tests <- runIO $ getLatTestsFromDir varBadDir
         mapM_ badTest tests
 
-dont :: SpecWith a -> SpecWith ()
-dont _ = return ()
-
 goodTest :: LatTest -> Spec
 goodTest latTest =
     if tstName latTest `elem` skip then runIO $ putStrLn $ "skipping " ++ tstName latTest
     else describe (tstName latTest) $ do
     let fs = StaticFS [StaticF (tstName latTest <.> latExt) (tstContents latTest)]
         out = runStaticIO (go latTest) [] fs
-        esp = staticContents $ fromJust $
-            find (\f -> staticPath f == espressoFile "." (tstName latTest)) (staticFiles $ staticFS out)
-        espLin = staticContents $ fromJust $
-            find (\f -> staticPath f == espressoWithoutDeadFile "." (tstName latTest)) (staticFiles $ staticFS out)
-        espPhi = staticContents $ fromJust $
-            find (\f -> staticPath f == espressoWithUnfoldedPhiFile "." (tstName latTest)) (staticFiles $ staticFS out)
-        espOpt = staticContents $ fromJust $
-            find (\f -> staticPath f == espressoOptimisedFile "." (tstName latTest)) (staticFiles $ staticFS out)
-        asm = staticContents $ fromJust $
-            find (\f -> staticPath f == assemblyFile "." (tstName latTest)) (staticFiles $ staticFS out)
-        espPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer esp
-        espLinPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espLin
-        espPhiPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espPhi
-        espOptPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer espOpt
     it (tstName latTest ++ " returns 0") $ LatteIO.staticCode out `shouldBe` ExitSuccess
-    case sequence [espPar, espLinPar, espPhiPar, espOptPar] of
-        Right [espProg, espLinProg, espPhiProg, espOptProg] -> do
+    it (tstName latTest ++ " is OK") $ LatteIO.staticErr out `shouldBe` tstErr latTest
+    testEspresso latTest "Espresso" (espressoFile "." (tstName latTest)) out False
+    testEspresso latTest "reachable Espresso" (reachableEspressoFile "." (tstName latTest)) out False
+    testEspresso latTest "SSA Espresso" (ssaEspressoFile "." (tstName latTest)) out True
+    testEspresso latTest "Optimised Espresso" (optimisedEspressoFile "." (tstName latTest)) out True
+    testEspresso latTest "no-phi Espresso" (unfoldedPhiEspressoFile "." (tstName latTest)) out False
+    testEspresso latTest "final Espresso" (finalEspressoFile "." (tstName latTest)) out False
+
+testEspresso :: LatTest -> String -> FilePath -> StaticOutput () -> Bool -> Spec
+testEspresso latTest descr fp out checkSSA = do
+    let esp = staticContents $ fromJust $
+            find (\f -> staticPath f == fp <.> "esp") (staticFiles $ staticFS out)
+        espPar = toEither $ ParEspresso.pProgram $ ParEspresso.myLexer esp
+    case espPar of
+        Right espProg -> do
             let espOut = runStaticIO (interpret $ unwrapPos espProg) (tstIn latTest) (StaticFS [])
-                espLinOut = runStaticIO (interpret $ unwrapPos espLinProg) (tstIn latTest) (StaticFS [])
-                espPhiOut = runStaticIO (interpret $ unwrapPos espPhiProg) (tstIn latTest) (StaticFS [])
-                espOptOut = runStaticIO (interpret $ unwrapPos espOptProg) (tstIn latTest) (StaticFS [])
-            it (tstName latTest ++ " is OK") $ LatteIO.staticErr out `shouldBe` tstErr latTest
-            it (tstName latTest ++ " Espresso returns 0") $
+            it (tstName latTest ++ " " ++ descr ++ " returns 0") $
                 LatteIO.staticCode espOut `shouldBe` ExitSuccess
-            it (tstName latTest ++ " Espresso output is correct") $
+            it (tstName latTest ++ " " ++ descr ++ " output is correct") $
                 normaliseOut (LatteIO.staticOut espOut) `shouldBe` normaliseOut (tstOut latTest)
-            it (tstName latTest ++ " linearised Espresso returns 0") $
-                LatteIO.staticCode espLinOut `shouldBe` ExitSuccess
-            it (tstName latTest ++ " linearised Espresso output is correct") $
-                normaliseOut (LatteIO.staticOut espLinOut) `shouldBe` normaliseOut (tstOut latTest)
-            it (tstName latTest ++ " unfolded phis Espresso returns 0") $
-                LatteIO.staticCode espPhiOut `shouldBe` ExitSuccess
-            it (tstName latTest ++ " unfolded phis Espresso output is correct") $
-                normaliseOut (LatteIO.staticOut espPhiOut) `shouldBe` normaliseOut (tstOut latTest)
-            it (tstName latTest ++ " unfolded phis Espresso returns 0") $
-                LatteIO.staticCode espOptOut `shouldBe` ExitSuccess
-            it (tstName latTest ++ " unfolded phis Espresso output is correct") $
-                normaliseOut (LatteIO.staticOut espOptOut) `shouldBe` normaliseOut (tstOut latTest)
-            it (tstName latTest ++ " x86_64 output is nonempty") $
-                null asm `shouldBe` False
-        Right _ -> Prelude.error "impossible"
+            when checkSSA $ it (tstName latTest ++ " " ++ descr ++ " is SSA") $
+                findMultipleAssignments espProg `shouldBe` []
         Left s -> Prelude.error (tstName latTest ++ ": " ++ s)
 
 badTest :: LatTest -> Spec

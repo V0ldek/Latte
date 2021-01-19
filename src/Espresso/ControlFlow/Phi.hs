@@ -1,8 +1,9 @@
 -- Unfolding of the phony phi function to make code viable for assembly codegen.
-module Espresso.ControlFlow.Phi (unfoldPhi) where
+module Espresso.ControlFlow.Phi (removeTrivialPhis, unfoldPhi, unfoldTrivialPhi) where
 
 import           Data.List
 import qualified Data.Map                 as Map
+import           Data.Maybe
 import qualified Data.Set                 as Set
 import           Espresso.ControlFlow.CFG
 import           Espresso.Syntax.Abs
@@ -13,20 +14,27 @@ data JumpRoute = JmpRt LabIdent LabIdent deriving (Eq, Ord)
 -- For a given method and its CFG, turn the code into an equivalent
 -- version without any IPhi instructions and return the new CFG.
 unfoldPhi :: (CFG (), Method ()) -> CFG ()
-unfoldPhi (CFG g, Mthd () t qi ps _) =
-    let (unfolded, jmpRoutes) = unzip $ Map.elems $ Map.map go g
+unfoldPhi (g, Mthd () t qi ps _) =
+    let (unfolded, jmpRoutes) = unzip $ map go $ lineariseNodes g
         rewritten = rerouteJumps (concat jmpRoutes) (concat unfolded)
     in cfg $ Mthd () t qi ps rewritten
     where
         go node = let l = nodeLabel node
                       code = nodeCode node
-                      nontrivial = map unfoldTrivialPhi code
+                      nontrivial = mapMaybe unfoldTrivialPhi code
                   in createJumpDests l nontrivial
 
-unfoldTrivialPhi :: Instr () -> Instr ()
+removeTrivialPhis :: CFG () -> CFG ()
+removeTrivialPhis = linearMap (\n -> n {nodeCode = mapMaybe unfoldTrivialPhi (nodeCode n)})
+
+unfoldTrivialPhi :: Instr () -> Maybe (Instr ())
 unfoldTrivialPhi instr = case instr of
-    IPhi a i [PhiVar _ _ val] -> ISet a i val
-    _                         -> instr
+    IPhi _ _ []               -> Nothing
+    IPhi _ i phiVars | all (\(PhiVar _ _ val) -> isVal val i) phiVars -> Nothing
+    IPhi _ i (PhiVar _ _ val@(VVal _ _ vi):phiVars)
+        | all (\(PhiVar _ _ val') -> isVal val' vi) phiVars -> Just $ ISet () i val
+    IPhi _ i [PhiVar _ _ val] -> Just $ ISet () i val
+    _                         -> Just instr
 
 -- Unwrap sequences of phi instructions by creating a special block for each incoming
 -- label that sets the values specified in the variants for that label and then jumps
@@ -68,7 +76,7 @@ createJumpDests l (labelInstr:instrs) =
                 (code, ls) = unzip $ map createSingleDest sourceToValuePairs
             in (concat code, ls)
         accVars (vi, phiVars) acc =
-            foldr (\(PhiVar _ src v) -> Map.insertWith (++) src [(vi, v)]) acc phiVars
+            foldr (\(PhiVar _ src v) m -> if isVal v vi then m else Map.insertWith (++) src [(vi, v)] m) acc phiVars
         createSingleDest (lSrc, setVals) =
             (ILabel () (phiUnfoldJumpFromToLabel lSrc l) :
             map (uncurry (ISet ())) setVals
@@ -115,13 +123,6 @@ rerouteJumps jmpRoutes instrs = reverse $ fst $ foldl' go ([], entryLabel) instr
               then phiUnfoldJumpFromToLabel lSrc lDest
               else lDest
 
-isPhi :: Instr a -> Bool
-isPhi instr = case instr of
-    IPhi {} -> True
-    _       -> False
-
-isLabel :: Instr a -> Bool
-isLabel instr = case instr of
-    ILabel {}    -> True
-    ILabelAnn {} -> True
-    _            -> False
+isVal :: Val () -> ValIdent -> Bool
+isVal (VVal _ _ vi) vi' = vi == vi'
+isVal _ _               = False

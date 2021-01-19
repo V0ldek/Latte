@@ -1,7 +1,6 @@
 module Espresso.CodeGen.Generator (generateEspresso) where
 
 import           Control.Monad.Reader
-import           Data.List                  (foldl')
 import qualified Data.Map                   as Map
 import           Data.Maybe                 (fromJust)
 import           Espresso.CodeGen.GenM
@@ -343,7 +342,10 @@ genCond e ltrue lfalse = case e of
         genCond e2 ltrue lfalse
     _ -> do
         val <- genExpr e
-        emit $ ICondJmp () val ltrue lfalse
+        case val of
+            VTrue _  -> emit $ IJmp () ltrue
+            VFalse _ -> emit $ IJmp () lfalse
+            _        -> emit $ ICondJmp () val ltrue lfalse
 
 -- Generate code for the given unary operator applied to an expression.
 genUnOp :: Latte.Expr SemData -> UnOp () -> GenM (Val ())
@@ -388,8 +390,7 @@ unifyVRet instrs =
         retToJmp instr      = instr
 
 -- Create a special .L_exit label signifying the end of the method
--- and turn all returns to jumps to that label. The return value
--- is propagated to a phi instruction at the start of .L_exit.
+-- and turn all returns to jumps to that label.
 -- Additionally add a jump at the end of the initial instruction sequence.
 -- There are no implicit returns in this case, but there might be an empty,
 -- unreachable label. For example, when we had an if-else instruction in
@@ -399,22 +400,19 @@ unifyVRet instrs =
 -- we need this artificial jump.
 unifyRet :: Latte.Type () -> [Instr ()] -> GenM [Instr ()]
 unifyRet t instrs = do
-    let (phi, _) = foldl' (flip goPhis) ([], entryLabel) instrs
-        instrs' = map retToJmp instrs
-    val <- valIdentFor (Latte.Ident "ret")
+    vi <- valIdentFor (Latte.Ident "ret")
+    let instrs' = concatMap (retToJmp vi) instrs
     return $ instrs' ++ [
             IJmp () exitLabel,
             ILabel () exitLabel,
-            IPhi () val phi,
-            IRet () (VVal () (toSType t) val)
+            IRet () (VVal () (toSType t) vi)
         ]
     where
-        goPhis (ILabel _ l) (phi, _)        = (phi, l)
-        goPhis (ILabelAnn _ l _ _) (phi, _) = (phi, l)
-        goPhis (IRet _ v) (phi, l)          = (PhiVar () l v:phi, l)
-        goPhis _ x                          = x
-        retToJmp IRet {} = IJmp () exitLabel
-        retToJmp i       = i
+        retToJmp retvi (IRet _ val) = [
+                ISet () retvi val,
+                IJmp () exitLabel
+            ]
+        retToJmp _ i = [i]
 
 data ValType = VLocal | VIndirect
 

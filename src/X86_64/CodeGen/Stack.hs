@@ -86,8 +86,8 @@ stackInsertReserved vi s = case Map.lookup vi (stackReservedSlots s) of
 
 -- Insert a given variable into the given slot.
 stackInsert :: ValIdent -> Slot -> Stack -> Stack
-stackInsert vi slot s = if (-slotOffset slot) + sizeInBytes (slotSize slot) < stackSize s
-                          then error "stackInsert: stack size exceeded"
+stackInsert vi slot s = if (-slotOffset slot) > stackSize s
+                          then error $ "stackInsert: stack size " ++ show (stackSize s) ++ " exceeded when inserting " ++ toStr vi ++ " into " ++ show slot
                           else s {stackOccupiedSlots = Map.insertWith (++) vi [slot] (stackOccupiedSlots s)}
 
 -- Whether the given variable is saved on the stack.

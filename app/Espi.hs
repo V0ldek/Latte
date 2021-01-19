@@ -49,7 +49,7 @@ run v p s = case p ts of
       showTree v tree'
       let cfgs = zip (map cfg mthds) mthds
       showCfgs v cfgs
-      let mthds' = map (\(g, Mthd a' r i ps _) -> Mthd a' r i ps (linearize g)) cfgs
+      let mthds' = map (\(g, Mthd a' r i ps _) -> Mthd a' r i ps (linearise g)) cfgs
           tree'' = Program a meta mthds'
       showTree v tree''
       interpret tree''
@@ -60,7 +60,7 @@ showTree :: (Show a, Print a) => Int -> a -> IO ()
 showTree v tree
  = do
       putStrV v $ "\n[Abstract Syntax]\n\n" ++ show tree
-      putStrV v $ "\n[Linearized tree]\n\n" ++ printTree tree
+      putStrV v $ "\n[linearised tree]\n\n" ++ printTree tree
 
 showCfgs :: Int -> [(CFG a, Method a)] -> IO ()
 showCfgs v = mapM_ showCfg
