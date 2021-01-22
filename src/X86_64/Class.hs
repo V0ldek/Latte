@@ -20,8 +20,9 @@ data CompiledField = Fld {
     fldOffset :: Int64
 }
 
-newtype VTable = VTab {
-    vtabMthds :: Map.Map SymIdent (String, Int64)
+data VTable = VTab {
+    vtabMthds   :: [(String, Int64)],
+    vtabMthdMap :: Map.Map SymIdent (String, Int64)
 }
 
 compileClass :: ClassDef a -> CompiledClass
@@ -48,5 +49,6 @@ layoutFields fldDefs =
             in (fld{fldOffset = offset + padding}:flds, offset + padding + fldSize)
 
 generateVTable :: [MethodDef a] -> VTable
-generateVTable mthdDefs = VTab $ Map.fromList $
-    zipWith (\(MthdDef _ _ qi@(QIdent _ _ si)) idx -> (si, (getCallTarget qi, idx * 8))) mthdDefs [0..]
+generateVTable mthdDefs =
+    let lookupList = zipWith (\(MthdDef _ _ qi@(QIdent _ _ si)) idx -> (si, (getCallTarget qi, idx * 8))) mthdDefs [0..]
+    in  VTab (map snd lookupList) (Map.fromList lookupList)

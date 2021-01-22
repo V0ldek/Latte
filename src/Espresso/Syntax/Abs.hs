@@ -95,20 +95,19 @@ data Instr a
     | IRet a (Val a)
     | IOp a ValIdent (Val a) (Op a) (Val a)
     | ISet a ValIdent (Val a)
-    | IStr a ValIdent String
+    | ISwap a (SType a) ValIdent ValIdent
     | IUnOp a ValIdent (UnOp a) (Val a)
     | IVCall a (Call a)
     | ICall a ValIdent (Call a)
     | INew a ValIdent (SType a)
     | INewArr a ValIdent (SType a) (Val a)
+    | INewStr a ValIdent String
     | IJmp a LabIdent
     | ICondJmp a (Val a) LabIdent LabIdent
-    | ILoad a ValIdent (Val a)
-    | IStore a (Val a) (Val a)
-    | IFld a ValIdent (Val a) (QIdent a)
-    | IArr a ValIdent (Val a) (Val a)
-    | IArrLen a ValIdent (Val a)
+    | ILoad a ValIdent (Ptr a)
+    | IStore a (Val a) (Ptr a)
     | IPhi a ValIdent [PhiVariant a]
+    | IEndPhi a
   deriving (Eq, Ord, Show, Read, Foldable)
 
 instance Functor Instr where
@@ -119,20 +118,34 @@ instance Functor Instr where
         IRet a val -> IRet (f a) (fmap f val)
         IOp a valident val1 op val2 -> IOp (f a) valident (fmap f val1) (fmap f op) (fmap f val2)
         ISet a valident val -> ISet (f a) valident (fmap f val)
-        IStr a valident string -> IStr (f a) valident string
+        ISwap a stype valident1 valident2 -> ISwap (f a) (fmap f stype) valident1 valident2
         IUnOp a valident unop val -> IUnOp (f a) valident (fmap f unop) (fmap f val)
         IVCall a call -> IVCall (f a) (fmap f call)
         ICall a valident call -> ICall (f a) valident (fmap f call)
         INew a valident stype -> INew (f a) valident (fmap f stype)
         INewArr a valident stype val -> INewArr (f a) valident (fmap f stype) (fmap f val)
+        INewStr a valident string -> INewStr (f a) valident string
         IJmp a labident -> IJmp (f a) labident
         ICondJmp a val labident1 labident2 -> ICondJmp (f a) (fmap f val) labident1 labident2
-        ILoad a valident val -> ILoad (f a) valident (fmap f val)
-        IStore a val1 val2 -> IStore (f a) (fmap f val1) (fmap f val2)
-        IFld a valident val qident -> IFld (f a) valident (fmap f val) (fmap f qident)
-        IArr a valident val1 val2 -> IArr (f a) valident (fmap f val1) (fmap f val2)
-        IArrLen a valident val -> IArrLen (f a) valident (fmap f val)
+        ILoad a valident ptr -> ILoad (f a) valident (fmap f ptr)
+        IStore a val ptr -> IStore (f a) (fmap f val) (fmap f ptr)
         IPhi a valident phivariants -> IPhi (f a) valident (map (fmap f) phivariants)
+        IEndPhi a -> IEndPhi (f a)
+data Ptr a
+    = PFld a (SType a) (Val a) (QIdent a)
+    | PElem a (SType a) (Val a) (Val a)
+    | PArrLen a (Val a)
+    | PLocal a (SType a) Integer
+    | PParam a (SType a) Integer ValIdent
+  deriving (Eq, Ord, Show, Read, Foldable)
+
+instance Functor Ptr where
+    fmap f x = case x of
+        PFld a stype val qident -> PFld (f a) (fmap f stype) (fmap f val) (fmap f qident)
+        PElem a stype val1 val2 -> PElem (f a) (fmap f stype) (fmap f val1) (fmap f val2)
+        PArrLen a val -> PArrLen (f a) (fmap f val)
+        PLocal a stype integer -> PLocal (f a) (fmap f stype) integer
+        PParam a stype integer valident -> PParam (f a) (fmap f stype) integer valident
 data PhiVariant a = PhiVar a LabIdent (Val a)
   deriving (Eq, Ord, Show, Read, Foldable)
 
@@ -211,6 +224,11 @@ isPhi instr = case instr of
     IPhi {} -> True
     _       -> False
 
+isEndPhi :: Instr a -> Bool
+isEndPhi instr = case instr of
+    IEndPhi {} -> True
+    _          -> False
+
 instance Hashable (Val a) where
     hashWithSalt salt val = case val of
         VInt _ n               -> hashWithSalt salt (0 :: Int8, n)
@@ -219,6 +237,15 @@ instance Hashable (Val a) where
         VFalse _               -> hashWithSalt salt (1 :: Int8, False)
         VNull _ _              -> hashWithSalt salt (2 :: Int8, False)
         VVal _ _ (ValIdent vi) -> hashWithSalt salt (3 :: Int8, vi)
+
+instance Hashable (SType a) where
+  hashWithSalt salt val = case val of
+      Int _   -> hashWithSalt salt (0 :: Int8, 0 :: Int)
+      Bool _  -> hashWithSalt salt (1 :: Int8, 1 :: Int)
+      Void _  -> hashWithSalt salt (2 :: Int8, 2 :: Int)
+      Arr _ t -> hashWithSalt salt (3 :: Int8, hashWithSalt salt t)
+      Cl _ i  -> hashWithSalt salt (4 :: Int8, hashWithSalt salt i)
+      Ref _ t -> hashWithSalt salt (5 :: Int8, hashWithSalt salt t)
 
 instance Hashable (Op a) where
     hashWithSalt salt val = case val of

@@ -12,6 +12,7 @@ isPowerOfTwo :: (Bits i, Integral i) => i -> Bool
 isPowerOfTwo 0 = False
 isPowerOfTwo n = n .&. (n-1) == 0
 
+-- Dicreete logarithm of base 2.
 log2 :: Int32 -> Int
 log2 = (31 -) . countLeadingZeros
 
@@ -62,9 +63,12 @@ dedupBy f xs = run (sortOn fst $ map (\x -> (f x, x)) xs)
     where run []           = []
           run ((k, x):xs') = x : run (dropWhile ((== k) . fst) xs')
 
+-- Safe version of single.
 ffirst :: (Foldable f) => f a -> Maybe a
 ffirst = find (const True)
 
+-- Unwrap a foldable sequence by returning its first element
+-- or erroring on an empty structure.
 single :: (Foldable f) => f a -> a
 single xs = fromMaybe (error "single: empty structure") (ffirst xs)
 
@@ -78,9 +82,13 @@ fixpoint = fixpointBy id
 fixpointBy :: (Eq b) => (a -> b) -> (a -> a) -> a -> a
 fixpointBy ord f x = let x' = f x in if ord x == ord x' then x' else fixpointBy ord f x'
 
+-- Iterate a monadic action until reaching a fixpoint
+-- as determined by the equality on the ordering map.
 fixpointM :: (Monad m, Eq a) => (a -> m a) -> a -> m a
 fixpointM = fixpointByM id
 
+-- Iterate a monadic action until reaching a fixpoint
+-- as determined by the type's equality relation.
 fixpointByM :: (Monad m, Eq b) => (a -> b) -> (a -> m a) -> a -> m a
 fixpointByM ord f x = do
     x' <- f x
@@ -88,6 +96,8 @@ fixpointByM ord f x = do
       then return x'
       else fixpointByM ord f x'
 
+-- Remove the last element in a list and return
+-- it and the modified list.
 splitLast :: [a] -> (a, [a])
 splitLast [] = error "empty"
 splitLast xs =

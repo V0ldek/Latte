@@ -14,3 +14,17 @@
 ## 0.9.1
 
 - Fixed an issue where locals were unnecessarily moved out of stack and back again at end of a basic block when they were not alived in the preceding block.
+
+## 0.10.0
+
+- Added structs.
+- Added arrays.
+- Added objects with inheritance and virtual methods.
+
+## 1.0.0
+
+Release version.
+
+- Added SSA transformation.
+- Added GCSE and other Espresso optimisations.
+- Added graph colouring based global register allocation.

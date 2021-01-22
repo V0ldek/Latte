@@ -25,15 +25,12 @@ goMthd (Mthd _ _ qi ps is) = do
         goInstr instr = case instr of
             IOp _ vi _ _ _   -> assign qi vi
             ISet _ vi _      -> assign qi vi
-            IStr _ vi _      -> assign qi vi
             IUnOp _ vi _ _   -> assign qi vi
             ICall _ vi _     -> assign qi vi
             INew _ vi _      -> assign qi vi
             INewArr _ vi _ _ -> assign qi vi
+            INewStr _ vi _   -> assign qi vi
             ILoad _ vi _     -> assign qi vi
-            IFld _ vi _ _    -> assign qi vi
-            IArr _ vi _ _    -> assign qi vi
-            IArrLen _ vi _   -> assign qi vi
             IPhi _ vi _      -> assign qi vi
             _                -> return ()
 

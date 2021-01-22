@@ -20,13 +20,14 @@ type Loc = Int
 type OEnv = Map.Map String Loc
 type CEnv = Map.Map String Class
 type LEnv = Map.Map String [Instr Pos]
+type PEnv = Map.Map Integer (Param ())
 type Store = Map.Map Loc Object
 
-data Env = Env { objEnv :: OEnv, clEnv :: CEnv, labelEnv :: LEnv }
+data Env = Env { objEnv :: OEnv, clEnv :: CEnv, labelEnv :: LEnv, paramEnv :: PEnv }
 
 data Object = Inst { objType_ :: Class, objData_ :: OEnv }
             | Array  { arrType_ :: SType (), arrData_ :: [Loc], arrLength_ :: Int}
-            | Ptr   { ref :: Loc }
+            | PRef   { ref :: Loc }
             | PInt Int
             | PBool Bool
             | PStr String
@@ -41,7 +42,7 @@ type InterpreterM m = StateT Store (ReaderT Env m)
 
 interpret :: (LatteIO m, Monad m) => Program Pos -> m ()
 interpret (Program _ (Meta _ clDefs) methods) = do
-    obj <- runReaderT (evalStateT go Map.empty) (Env Map.empty env Map.empty)
+    obj <- runReaderT (evalStateT go Map.empty) (Env Map.empty env Map.empty Map.empty)
     let PInt n = obj
     if n == 0 then exitSuccess else exitWith $ ExitFailure n
     where
@@ -70,8 +71,9 @@ call :: (LatteIO m, Monad m) => Function -> [Object] -> (Object -> InterpreterM 
 call (Fun _ _ ps code) objs ret = do
     argEnv <- allocs args
     let labels = getLabels code
+        params = zip [0..] ps
     ret' <- saveEnv2 ret
-    localObjs argEnv $ localLabels labels $ execute (toStr entryLabel) (toStr entryLabel) code ret'
+    localParams params $ localObjs argEnv $ localLabels labels $ execute (toStr entryLabel) (toStr entryLabel) code ret'
     where
         args = zipWith (\(Param _ _ vi) p -> (toStr vi, p)) ps objs
 
@@ -120,9 +122,18 @@ execute prevLabel currLabel (instr : is) ret = case instr of
         x <- getVal v
         newval <- store (toStr i) x
         localObj newval $ execute prevLabel currLabel is ret
-    IStr _ i str -> do
-        newval <- store (toStr i) (PStr str)
-        localObj newval $ execute prevLabel currLabel is ret
+    ISwap _ _ (ValIdent vi1) (ValIdent vi2) -> do
+        mbloc1 <- asks (Map.lookup vi1 . objEnv)
+        mbloc2 <- asks (Map.lookup vi2 . objEnv)
+        x1 <- case mbloc1 of
+            Just loc1 -> deref $ PRef loc1
+            Nothing   -> return PNull
+        x2 <- case mbloc2 of
+            Just loc1 -> deref $ PRef loc1
+            Nothing   -> return PNull
+        newval1 <- store vi1 x2
+        newval2 <- store vi2 x1
+        localObj newval1 $ localObj newval2 $ execute prevLabel currLabel is ret
     IUnOp _ i op v -> do
         x <- getVal v
         let res = performUnOp x op
@@ -140,7 +151,7 @@ execute prevLabel currLabel (instr : is) ret = case instr of
                 obj = Inst cl flds
             loc <- newloc
             storeObj loc obj
-            let ref_ = Ptr loc
+            let ref_ = PRef loc
             newval <- store (toStr i) ref_
             localObj newval $ execute prevLabel currLabel is ret
         _ -> Prelude.error $ "internal error. new on a nonclass" ++ show t
@@ -153,6 +164,9 @@ execute prevLabel currLabel (instr : is) ret = case instr of
                 newval <- store (toStr i) arr
                 localObj newval $ execute prevLabel currLabel is ret
             _ -> Prelude.error $ "internal error. invalid type of size of array " ++ show size
+    INewStr _ i str -> do
+        newval <- store (toStr i) (PStr str)
+        localObj newval $ execute prevLabel currLabel is ret
     IJmp _ i -> do
         is' <- askLabel (toStr i)
         execute currLabel (toStr i) is' ret
@@ -165,27 +179,30 @@ execute prevLabel currLabel (instr : is) ret = case instr of
             then (toStr i1, is1)
             else (toStr i2, is2)
         execute currLabel label is' ret
-    ILoad _ i v -> do
-        x <- getVal v >>= deref
+    ILoad _ i ptr -> do
+        x <- loadFrom ptr
         newval <- store (toStr i) x
         localObj newval $ execute prevLabel currLabel is ret
-    IStore _ v1 v2 -> do
-        x1 <- getVal v1
-        x2 <- getVal v2
-        storeInto x2 x1
-        execute prevLabel currLabel is ret
-    IFld _ i v (QIdent _ _ (SymIdent fldI)) -> do
+    IStore _ v ptr -> do
         x <- getVal v
-        obj <- deref x
-        case obj of
-            Inst _ flds -> case Map.lookup fldI flds of
-                Just loc -> do
-                    newval <- store (toStr i) (Ptr loc)
-                    localObj newval $ execute prevLabel currLabel is ret
-                Nothing  -> LatteIO.error $ "internal error. nonexistent field " ++ fldI
-            _ -> LatteIO.error $ "internal error. fldptr called on noninstance " ++ show obj
-    IArr _ i arrV idxV -> do
-        arr <- getVal arrV
+        storeInto ptr x
+        execute prevLabel currLabel is ret
+    IPhi _ i variants -> do
+        let Just (PhiVar _ _ val) = find (\(PhiVar _ l _) -> toStr l == prevLabel) variants
+        obj <- getVal val
+        newval <- store (toStr i) obj
+        localObj newval $ execute prevLabel currLabel is ret
+    IEndPhi {} -> execute prevLabel currLabel is ret
+
+loadFrom :: (LatteIO m, Monad m) => Ptr a -> InterpreterM m Object
+loadFrom ptr = case ptr of
+    PArrLen _ v -> do
+        x <- getVal v >>= deref
+        case x of
+            Array _ _ len -> return $ PInt len
+            _ -> LatteIO.error $ "internal error. invalid type in arrlen " ++ show x
+    PElem _ _ arrV idxV -> do
+        arr <- getVal arrV >>= deref
         idx <- getVal idxV
         case (arr, idx) of
             (Array _ data_ len, PInt n) ->
@@ -193,21 +210,33 @@ execute prevLabel currLabel (instr : is) ret = case instr of
                   then LatteIO.error $ "internal error. arrptr index overflow " ++ show n ++ " >= " ++ show len
                   else do
                     let loc = data_ !! n
-                    newval <- store (toStr i) (Ptr loc)
-                    localObj newval $ execute prevLabel currLabel is ret
+                    gets (Map.! loc)
             _ -> LatteIO.error $ "internal error. invalid types in arrptr " ++ show arr ++ ", " ++ show idx
-    IArrLen _ i v -> do
-        x <- getVal v
+    PFld _ _ v (QIdent _ _ (SymIdent fldI)) -> do
+        x <- getVal v >>= deref
         case x of
-            Array _ _ len -> do
-                newval <- store (toStr i) (PInt len)
-                localObj newval $ execute prevLabel currLabel is ret
-            _ -> LatteIO.error $ "internal error. invalid type in arrlen " ++ show x
-    IPhi _ i variants -> do
-        let Just (PhiVar _ _ val) = find (\(PhiVar _ l _) -> toStr l == prevLabel) variants
-        obj <- getVal val
-        newval <- store (toStr i) obj
-        localObj newval $ execute prevLabel currLabel is ret
+            Inst _ flds -> case Map.lookup fldI flds of
+                Just loc -> gets (Map.! loc)
+                Nothing  -> LatteIO.error $ "internal error. nonexistent field " ++ fldI
+            _ -> LatteIO.error $ "internal error. fldptr called on noninstance " ++ show x
+    PLocal _ _ n -> do
+        mbloc <- gets (Map.lookup (localLoc n))
+        case mbloc of
+            Just obj -> return obj
+            Nothing -> LatteIO.error $ "internal error. local " ++ show n ++ " load before store"
+    PParam _ _ n _ -> do
+        (Param _ _ (ValIdent vi)) <- askParam n
+        loc <- askObj vi
+        gets (Map.! loc)
+
+deref :: (LatteIO m, Monad m) => Object -> InterpreterM m Object
+deref x = case x of
+    PRef loc -> do
+        mbobj <- gets (Map.lookup loc)
+        case mbobj of
+            Nothing  -> LatteIO.error ("internal error, pointer " ++ show loc ++ " not found")
+            Just obj -> return obj
+    _       -> return x
 
 askFun :: (LatteIO m, Monad m) => String -> String -> InterpreterM m Function
 askFun clI mthdI = do
@@ -229,6 +258,13 @@ askLabel label = do
     case mbl of
         Nothing -> LatteIO.error ("internal error, label " ++ label ++ " not found")
         Just l -> return l
+
+askParam :: (LatteIO m, Monad m) => Integer -> InterpreterM m (Param ())
+askParam n = do
+    mbp <- asks (Map.lookup n . paramEnv)
+    case mbp of
+        Nothing -> LatteIO.error ("internal error, param " ++ show n ++ " not found")
+        Just p -> return p
 
 askObj :: (LatteIO m, Monad m) => String -> InterpreterM m Loc
 askObj i = do
@@ -256,10 +292,32 @@ store i obj = do
 storeObj :: (LatteIO m, Monad m) => Loc -> Object -> InterpreterM m ()
 storeObj loc obj = modify $ Map.insert loc obj
 
-storeInto :: (LatteIO m, Monad m) => Object -> Object -> InterpreterM m ()
+storeInto :: (LatteIO m, Monad m) => Ptr Pos -> Object -> InterpreterM m ()
 storeInto to obj = case to of
-    Ptr loc -> modify $ Map.insert loc obj
-    _       -> Prelude.error "internal error, invalid store"
+    PArrLen _ v -> LatteIO.error $ "internal error. store to array length " ++ show v
+    PElem _ _ arrV idxV -> do
+        arr <- getVal arrV
+        idx <- getVal idxV
+        case (arr, idx) of
+            (Array _ data_ len, PInt n) ->
+                if len <= n
+                  then LatteIO.error $ "internal error. arrptr index overflow " ++ show n ++ " >= " ++ show len
+                  else do
+                    let loc = data_ !! n
+                    storeObj loc obj
+            _ -> LatteIO.error $ "internal error. invalid types in arrptr " ++ show arr ++ ", " ++ show idx
+    PFld _ _ v (QIdent _ _ (SymIdent fldI)) -> do
+        x <- getVal v >>= deref
+        case x of
+            Inst _ flds -> case Map.lookup fldI flds of
+                Just loc -> storeObj loc obj
+                Nothing  -> LatteIO.error $ "internal error. nonexistent field " ++ fldI
+            _ -> LatteIO.error $ "internal error. fldptr called on noninstance " ++ show x
+    PLocal _ _ n -> storeObj (localLoc n) obj
+    PParam _ _ n _ -> do
+        (Param _ _ (ValIdent vi)) <- askParam n
+        loc <- askObj vi
+        storeObj loc obj
 
 getVal :: (LatteIO m, Monad m) => Val a -> InterpreterM m Object
 getVal val = case val of
@@ -268,7 +326,7 @@ getVal val = case val of
     VTrue _     -> return $ PBool True
     VFalse _    -> return $ PBool False
     VNull {}    -> return PNull
-    VVal _ _ i  -> askObj (toStr i) >>= (deref . Ptr)
+    VVal _ _ i  -> askObj (toStr i) >>= (deref . PRef)
 
 newloc :: (LatteIO m, Monad m) => InterpreterM m Int
 newloc = do
@@ -293,6 +351,9 @@ defaultValue t = case t of
 localObjs :: (LatteIO m, Monad m) => [(String, Loc)] -> InterpreterM m a -> InterpreterM m a
 localObjs objs = local (\e -> e { objEnv = Map.fromList objs })
 
+localParams :: (LatteIO m, Monad m) => [(Integer, Param ())] -> InterpreterM m a -> InterpreterM m a
+localParams ps = local (\e -> e { paramEnv = Map.fromList ps })
+
 localObj :: (LatteIO m, Monad m) => (String, Loc) -> InterpreterM m a -> InterpreterM m a
 localObj (i, ptr) = local (\e -> e { objEnv = Map.insert i ptr $ objEnv e })
 
@@ -303,15 +364,6 @@ saveEnv2 :: (LatteIO m, Monad m) => (a -> InterpreterM m b) -> InterpreterM m (a
 saveEnv2 m = do
     env <- ask
     return (local (const env) . m)
-
-deref :: (LatteIO m, Monad m) => Object -> InterpreterM m Object
-deref x = case x of
-    Ptr loc -> do
-        mbobj <- gets (Map.lookup loc)
-        case mbobj of
-            Nothing  -> LatteIO.error ("internal error, pointer " ++ show loc ++ " not found")
-            Just obj -> return obj
-    _       -> return x
 
 isTrue :: (LatteIO m, Monad m) => Object -> InterpreterM m Bool
 isTrue x = case x of
@@ -346,7 +398,7 @@ areEq x1 x2 = case (x1, x2) of
     (PStr s1, PStr s2)   -> s1 == s2
     (PBool b1, PBool b2) -> b1 == b2
     (PNull, PNull)       -> True
-    (Ptr p1, Ptr p2)     -> p1 == p2
+    (PRef p1, PRef p2)   -> p1 == p2
     _                    -> False
 
 getOrd :: Object -> Object -> Op Pos -> Bool
@@ -362,6 +414,9 @@ getOrd x1 x2 op = case (x1, x2) of
                 OpLTH {} -> x1' < x2'
                 OpLE {}  -> x1' <= x2'
                 _        -> Prelude.error $ "internal error, invalid relop " ++ show op
+
+localLoc :: Integer -> Loc
+localLoc n = fromInteger $ (-n) - 1
 
 isNativeFun :: String -> String -> Bool
 isNativeFun i1 i2 = i1 == toStr topLevelClassIdent &&
@@ -394,7 +449,7 @@ instance Show Object where
     show o = case o of
         Inst t _    -> clName t
         Array t _ l -> show t ++ "[" ++ show l ++ "]"
-        Ptr t       -> "&" ++ show t
+        PRef t      -> "&" ++ show t
         PInt _      -> "int"
         PBool _     -> "bool"
         PStr _      -> "string"

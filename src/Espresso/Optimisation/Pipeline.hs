@@ -8,11 +8,12 @@ import           Espresso.Optimisation.Propagation
 import           Espresso.Syntax.Abs
 import           Utilities
 
+-- Main optimisation pipeline.
 optimise :: SSA () -> Method () -> SSA ()
 optimise ssa mthd = fixpoint ((`propagateCopiesAndConsts` mthd) .
                     (() <$) .
                     globalCommonSubexpressionElimination .
-                    removeDeadCode .
+                    removeDeadCodeSSA .
                     analyseLivenessSSA) ssa
 
 analyseLivenessSSA :: SSA () -> SSA Liveness

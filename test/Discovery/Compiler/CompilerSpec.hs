@@ -60,6 +60,9 @@ spec = parallel $ do
     describe "Extension var bad" $ do
         tests <- runIO $ getLatTestsFromDir varBadDir
         mapM_ badTest tests
+    describe "Extensions combined" $ do
+        tests <- runIO $ getLatTestsFromDir combinedDir
+        mapM_ goodTest tests
 
 goodTest :: LatTest -> Spec
 goodTest latTest =
@@ -166,6 +169,9 @@ varGoodDir = testRootDir </> "extensions" </> "var" </> "good"
 
 varBadDir :: FilePath
 varBadDir = testRootDir </> "extensions" </> "var" </> "bad"
+
+combinedDir :: FilePath
+combinedDir = testRootDir </> "extensions" </> "combined"
 
 testRootDir :: FilePath
 testRootDir = "." </> "test" </> "lattests"

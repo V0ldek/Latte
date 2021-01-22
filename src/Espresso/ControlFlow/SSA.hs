@@ -4,6 +4,7 @@ module Espresso.ControlFlow.SSA (transformToSSA, unwrapSSA, SSA(..)) where
 
 import           Control.Monad.State
 import           Data.Bifunctor
+import qualified Data.HashMap.Strict           as HashMap
 import           Data.List
 import qualified Data.Map                      as Map
 import           Data.Maybe
@@ -31,19 +32,25 @@ transformToSSA g (Mthd _ _ _ params _) =
         (g'', dicts) = transformLocally g' params
     in SSA $ removeTrivialPhis $ fillPhis g'' dicts
 
+-- For each node u and its predecessors v1, ..., vn insert
+-- empty phi instructions for every variable x alive at the start of u:
+--- x = phi(v1: x, ..., vn: x)
 insertEmptyPhis :: CFG Liveness -> CFG ()
 insertEmptyPhis = linearMap insertInNode
     where
-        insertInNode node = if nodeLabel node == entryLabel then () <$ node else
+        insertInNode node =
             let (ls, code) = partition isLabel (nodeCode node)
                 ls' = map (() <$) ls
                 code' = map (() <$) code
                 phis' = map (() <$) (phis node)
-            in  node {nodeCode = ls' ++ phis' ++ code'}
+                endPhi = [IEndPhi () | not (any isEndPhi code)]
+            in  node {nodeCode = ls' ++ phis' ++ endPhi ++ code'}
         phis node = map fst $ foldl' addPhiVars (emptyPhis node) (Set.elems $ nodeIn node)
         addPhiVars xs n = map (\(IPhi _ vi phiVars, t) -> (IPhi () vi (PhiVar () n (VVal () t vi):phiVars), t)) xs
-        emptyPhis node = map (\(vi, (_, t)) -> (IPhi () (ValIdent vi) [], t)) (Map.toList $ liveIn $ nodeLiveness node)
+        emptyPhis node = map (\(vi, (_, t)) -> (IPhi () (ValIdent vi) [], t)) (HashMap.toList $ liveIn $ nodeLiveness node)
 
+-- Given the translations for each incoming label, replace the empty phi instruction
+-- with the actual values from each node.
 fillPhis :: CFG () -> Map.Map LabIdent RenameDictionary -> CFG ()
 fillPhis g dicts = linearMap fillInNode g
     where
@@ -60,6 +67,10 @@ fillPhis g dicts = linearMap fillInNode g
             in  PhiVar () n (VVal () t vi')
         fillPhiVar _ = error "impossible"
 
+-- Perform SSA translation without touching the contents of phi instructions.
+-- Each assignment generates new version of the value.
+-- That version is valid until next static assignment.
+-- The resulting RenameDictionary is the version of the value at end of a block.
 type TransformState = (Map.Map ValIdent ValIdent, Map.Map ValIdent RenamedValIdent)
 transformLocally :: CFG a -> [Param ()] -> (CFG a, Map.Map LabIdent RenameDictionary)
 transformLocally g params =
@@ -75,22 +86,25 @@ transformLocally g params =
             return (nodeLabel node, (node {nodeCode = instrs}, Dict d))
         transformInstr instr = case instr of
             IRet a val -> do
-                x <- rename val
+                x <- renameVal val
                 return $ IRet a x
             IOp a vi val1 op val2 -> do
-                x1 <- rename val1
-                x2 <- rename val2
+                x1 <- renameVal val1
+                x2 <- renameVal val2
                 vi' <- newVersion vi
                 return $ IOp a vi' x1 op x2
             ISet a vi val -> do
-                x <- rename val
+                x <- renameVal val
                 vi' <- newVersion vi
                 return $ ISet a vi' x
-            IStr a vi str -> do
-                vi' <- newVersion vi
-                return $ IStr a vi' str
+            ISwap a t vi1 vi2 -> do
+                mbvi1' <- gets (Map.lookup vi1 . fst)
+                let vi1' = fromMaybe vi1 mbvi1'
+                mbvi2' <- gets (Map.lookup vi2 . fst)
+                let vi2' = fromMaybe vi2 mbvi2'
+                return $ ISwap a t vi1' vi2'
             IUnOp a vi op val -> do
-                x <- rename val
+                x <- renameVal val
                 vi' <- newVersion vi
                 return $ IUnOp a vi' op x
             IVCall a call -> do
@@ -104,50 +118,50 @@ transformLocally g params =
                 vi' <- newVersion vi
                 return $ INew a vi' t
             INewArr a vi t val -> do
-                x <- rename val
+                x <- renameVal val
                 vi' <- newVersion vi
                 return $ INewArr a vi' t x
             ICondJmp a val l1 l2 -> do
-                x <- rename val
+                x <- renameVal val
                 return $ ICondJmp a x l1 l2
-            ILoad a vi val -> do
-                x <- rename val
+            ILoad a vi ptr -> do
+                x <- renamePtr ptr
                 vi' <- newVersion vi
                 return $ ILoad a vi' x
-            IStore a val1 val2 -> do
-                x1 <- rename val1
-                x2 <- rename val2
+            IStore a val ptr -> do
+                x1 <- renameVal val
+                x2 <- renamePtr ptr
                 return $ IStore a x1 x2
-            IFld a vi val qi -> do
-                x <- rename val
-                vi' <- newVersion vi
-                return $ IFld a vi' x qi
-            IArr a vi val1 val2 -> do
-                x1 <- rename val1
-                x2 <- rename val2
-                vi' <- newVersion vi
-                return $ IArr a vi' x1 x2
-            IArrLen a vi val -> do
-                x <- rename val
-                vi' <- newVersion vi
-                return $ IArrLen a vi' x
             IPhi a vi phiVars -> do
                 vi' <- newVersion vi
                 return $ IPhi a vi' phiVars
             _ -> return instr
         transformCall call = case call of
             Call a t qi vals -> do
-                xs <- mapM rename vals
+                xs <- mapM renameVal vals
                 return $ Call a t qi xs
             CallVirt a t qi vals -> do
-                xs <- mapM rename vals
+                xs <- mapM renameVal vals
                 return $ CallVirt a t qi xs
-        rename val = case val of
+        renameVal val = case val of
             VVal a t vi -> do
                 mbvi' <- gets (Map.lookup vi . fst)
                 let vi' = fromMaybe vi mbvi'
                 return $ VVal a t vi'
             _ -> return val
+        renamePtr ptr = case ptr of
+            PArrLen a val -> do
+                x <- renameVal val
+                return $ PArrLen a x
+            PElem a t val1 val2 -> do
+                x1 <- renameVal val1
+                x2 <- renameVal val2
+                return $ PElem a t x1 x2
+            PFld a t val qi -> do
+                x <- renameVal val
+                return $ PFld a t x qi
+            PLocal {} -> return ptr
+            PParam {} -> return ptr
         newVersion vi = do
             mbvi' <- gets (Map.lookup vi . snd)
             let version' = case mbvi' of

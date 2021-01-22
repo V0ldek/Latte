@@ -4,10 +4,10 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: fa4825cef3257b7d0c9a5668c5473858eed38fe0eb12b6582bd31a693e36c160
+-- hash: 9526aef6ba5b867cc405aa8f0fe45ea03850854b56928ba5b5f542e3db16c060
 
 name:           Latte
-version:        0.10.0.0
+version:        1.0.0.0
 description:    Please see the README on GitHub at <https://github.com/V0ldek/Latte#readme>
 homepage:       https://github.com/githubuser/Latte#readme
 bug-reports:    https://github.com/githubuser/Latte/issues
@@ -71,13 +71,15 @@ library
       X86_64.CodeGen.GenM
       X86_64.CodeGen.Module
       X86_64.CodeGen.Prologue
-      X86_64.CodeGen.RegisterAllocation
       X86_64.CodeGen.Stack
       X86_64.Loc
       X86_64.Optimisation.Peephole
+      X86_64.Phi
+      X86_64.RegisterAllocation
       X86_64.RegisterAllocation.InterferenceGraph
-      X86_64.RegisterAllocation.RandomSequence
+      X86_64.RegisterAllocation.PerfectEliminationOrdering
       X86_64.RegisterAllocation.SequenceColouring
+      X86_64.RegisterAllocation.Spilling
       X86_64.Registers
       X86_64.Size
   other-modules:

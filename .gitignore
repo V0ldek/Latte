@@ -3,3 +3,5 @@
 latc_x86_64
 espi
 lib/runtime.o
+tmp/
+test/x86_64Spec_workdir

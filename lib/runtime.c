@@ -147,8 +147,8 @@ void lat_error()
     TERMINATE("runtime error\n");
 }
 
-void lat_nullref() 
-{ 
+void lat_nullref()
+{
     TERMINATE("runtime error. attempt to dereference a null.\n");
 }
 

@@ -12,7 +12,8 @@ module Espresso.CodeGen.GenM (
       toVVal,
       valIdentFor,
       GenM,
-      EspVal(..)
+      EspPtr(..),
+      EspVal(..),
 ) where
 
 import           Control.Monad.Identity
@@ -44,6 +45,7 @@ data Env = Env {
 
 -- Espresso value.
 data EspVal = EspVal {valName :: ValIdent, valType_ :: SType ()}
+data EspPtr = EspPtr {ptrVal :: Ptr (), ptrType_ :: SType ()}
 
 type GenM = StateT Store (Reader Env)
 

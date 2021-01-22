@@ -86,7 +86,7 @@ normaliseOut :: String -> String
 normaliseOut s = dropWhile isSpace $ reverse $ dropWhile isSpace $ reverse s
 
 testSets :: IO [ExecTestSet]
-testSets = sequence [coreTestSet, structTestSet, arrayTestSet, objectsTestSet, callvirtTestSet, varTestSet]
+testSets = sequence [coreTestSet, structTestSet, arrayTestSet, objectsTestSet, callvirtTestSet, varTestSet, combinedTestSet]
 
 coreTestSet :: IO ExecTestSet
 coreTestSet = getTestSet coreTestsDirectory "Core"
@@ -102,6 +102,9 @@ objectsTestSet = getTestSet objects1TestDirectory "Objects"
 
 callvirtTestSet :: IO ExecTestSet
 callvirtTestSet = getTestSet objects2TestDirectory "Callvirt"
+
+combinedTestSet :: IO ExecTestSet
+combinedTestSet = getTestSet combinedTestDirectory "Combi9ed"
 
 varTestSet :: IO ExecTestSet
 varTestSet = getTestSet varTestDictionary "Var"
@@ -138,6 +141,9 @@ objects1TestDirectory = testDirectoryRoot </> "extensions" </> "objects1" </> "g
 
 objects2TestDirectory :: FilePath
 objects2TestDirectory = testDirectoryRoot </> "extensions" </> "objects2"
+
+combinedTestDirectory :: FilePath
+combinedTestDirectory = testDirectoryRoot </> "extensions" </> "combined"
 
 varTestDictionary :: FilePath
 varTestDictionary = testDirectoryRoot </> "extensions" </> "var" </> "good"

@@ -1,3 +1,4 @@
+-- Implementation of copy and constant propagation for Espresso.
 module Espresso.Optimisation.Propagation where
 
 import           Control.Monad.State
@@ -10,9 +11,9 @@ import           Espresso.ControlFlow.SSA
 import           Espresso.Syntax.Abs
 import           Utilities
 
-data ValKind = ValSimple (Val ())
-             | ValString String
-             | ValComplex
+data ValKind = ValSimple (Val ())   -- Value is a simple copy of another value.
+             | ValString String     -- Value is a string constant.
+             | ValComplex           -- Value is computed by a complex expression and irreducible.
     deriving Eq
 
 newtype PropagationState = St {
@@ -24,7 +25,7 @@ propagateCopiesAndConsts (SSA g) (Mthd _ t qi ps _) =
     let instrs = linearise g
         psKinds = map (\(Param _ _ vi) -> (vi, ValComplex)) ps
         f (is, s) = first concat $ runState (mapM propagate is) s
-        (instrs', _) = fixpointBy (Map.size . values . snd) f (instrs, St $ Map.fromList psKinds)
+        (instrs', _) = fixpointBy (values . snd) f (instrs, St $ Map.fromList psKinds)
     in  SSA $ cfg (Mthd () t qi ps instrs')
 
 propagate :: Instr () -> State PropagationState [Instr ()]
@@ -40,7 +41,7 @@ propagate instr = case instr of
         case (mbstr1, mbstr2) of
             (Just s1, Just s2) -> do
                 setString vi (s1 ++ s2)
-                return [IStr () vi (s1 ++ s2)]
+                return [INewStr () vi (s1 ++ s2)]
             _ -> do
                 let simplified = trySimplifyBinOp x1 op x2
                 case simplified of
@@ -54,9 +55,6 @@ propagate instr = case instr of
         x <- tryPropagate val
         setSimple vi x
         return []
-    IStr _ vi str -> do
-        setString vi str
-        return [IStr () vi str]
     IUnOp _ vi unOp val -> do
         x <- tryPropagate val
         let simplified = trySimplifyUnOp x unOp
@@ -81,39 +79,44 @@ propagate instr = case instr of
         x <- tryPropagate val
         setComplex vi
         return [INewArr () vi t x]
+    INewStr _ vi str -> do
+        setString vi str
+        return [INewStr () vi str]
     ICondJmp _ val l1 l2 -> do
         x <- tryPropagate val
         return $ case x of
             VTrue _  -> [IJmp () l1]
             VFalse _ -> [IJmp () l2]
             _        -> [ICondJmp () x l1 l2]
-    ILoad _ vi val -> do
+    ILoad _ vi ptr -> do
+        ptr' <- propagateInPtr ptr
+        setComplex vi
+        return [ILoad () vi ptr']
+    IStore _ val ptr -> do
         x <- tryPropagate val
-        setComplex vi
-        return [ILoad () vi x]
-    IStore _ val1 val2 -> do
-        x1 <- tryPropagate val1
-        x2 <- tryPropagate val2
-        return [IStore () x1 x2]
-    IFld _ vi val qi -> do
-        x <- tryPropagate val
-        setComplex vi
-        return [IFld () vi x qi]
-    IArr _ vi val1 val2 -> do
-        x1 <- tryPropagate val1
-        x2 <- tryPropagate val2
-        setComplex vi
-        return [IArr () vi x1 x2]
-    IArrLen _ vi val -> do
-        x <- tryPropagate val
-        setComplex vi
-        return [IArrLen () vi x]
+        ptr' <- propagateInPtr ptr
+        return [IStore () x ptr']
     IPhi _ vi phiVar -> do
         setComplex vi
         phiVar' <- mapM propagateInPhiVar phiVar
         let mbphi = unfoldTrivialPhi (IPhi () vi phiVar')
         return $ maybeToList mbphi
     _ -> return [instr]
+
+propagateInPtr :: Ptr () -> State PropagationState (Ptr ())
+propagateInPtr ptr = case ptr of
+    PArrLen _ val -> do
+        x <- tryPropagate val
+        return $ PArrLen () x
+    PElem _ t val1 val2 -> do
+        x1 <- tryPropagate val1
+        x2 <- tryPropagate val2
+        return $ PElem () t x1 x2
+    PFld _ t val qi -> do
+        x <- tryPropagate val
+        return $ PFld () t x qi
+    PLocal {} -> return ptr
+    PParam {} -> return ptr
 
 propagateInCall :: Call () -> State PropagationState (Call ())
 propagateInCall call = case call of

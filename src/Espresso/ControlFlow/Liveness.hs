@@ -1,20 +1,25 @@
 {-# LANGUAGE TupleSections #-}
 -- Annotations of variable liveness for CFGs.
+-- This is done multiple times during code generation, including in a loop
+-- in optimisation pipeline, so hashed containers are used to amp the performance.
 module Espresso.ControlFlow.Liveness where
 
 import           Data.Bifunctor
-import qualified Data.Map                 as Map
-import qualified Data.Set                 as Set
+import qualified Data.HashMap.Strict      as Map
+import qualified Data.HashSet             as Set
+import qualified Data.Map                 as OrdMap
+import qualified Data.Set                 as OrdSet
 import           Espresso.ControlFlow.CFG (CFG (..), Node (..), linearMap)
 import           Espresso.Syntax.Abs
+import           Identifiers
 import           Utilities
 
-type VarSet = Set.Set String
-type TypedVarSet = Map.Map String (SType ())
+type VarSet = Set.HashSet String
+type TypedVarSet = Map.HashMap String (SType ())
 -- A map between variables and the shortest distance
 -- (in number of instructions) to its next use and the
 -- type context of that use
-type NextUse = Map.Map String (Int, SType ())
+type NextUse = Map.HashMap String (Int, SType ())
 
 -- Liveness annotations for a single instruction.
 data Liveness = Liveness {
@@ -45,23 +50,21 @@ initialLiveness = linearMap nodeInitLive
     where nodeInitLive node = node { nodeCode = map instrInitLive (nodeCode node) }
           instrInitLive instr =
               let (use, kill) = case instr of
-                    IRet _ v         -> (valSet v, Set.empty)
-                    IOp _ vi v1 _ v2 -> (valsSet [v1, v2], valISet vi)
-                    ISet _ vi v      -> (valSet v, valISet vi)
-                    IStr _ vi _      -> (Map.empty, valISet vi)
-                    IUnOp _ vi _ v   -> (valSet v, valISet vi)
-                    IVCall _ call    -> (callUseSet call, Set.empty)
-                    ICall _ vi call  -> (callUseSet call, valISet vi)
-                    INew _ vi _      -> (Map.empty, valISet vi)
-                    INewArr _ vi _ v -> (valSet v, valISet vi)
-                    ICondJmp _ v _ _ -> (valSet v, Set.empty)
-                    ILoad _ vi v     -> (valSet v, valISet vi)
-                    IStore _ v1 v2   -> (valsSet [v1, v2], Set.empty)
-                    IFld _ vi v _    -> (valSet v, valISet vi)
-                    IArr _ vi v1 v2  -> (valsSet [v1, v2], valISet vi)
-                    IArrLen _ vi v   -> (valSet v, valISet vi)
-                    IPhi _ vi phis   -> (phiUseSet phis, valISet vi)
-                    _                -> (Map.empty, Set.empty)
+                    IRet _ v          -> (valSet v, Set.empty)
+                    IOp _ vi v1 _ v2  -> (valsSet [v1, v2], valISet vi)
+                    ISet _ vi v       -> (valSet v, valISet vi)
+                    ISwap _ t vi1 vi2 -> (Map.fromList [(toStr vi2, () <$ t)], valISet vi1)
+                    IUnOp _ vi _ v    -> (valSet v, valISet vi)
+                    IVCall _ call     -> (callUseSet call, Set.empty)
+                    ICall _ vi call   -> (callUseSet call, valISet vi)
+                    INew _ vi _       -> (Map.empty, valISet vi)
+                    INewArr _ vi _ v  -> (valSet v, valISet vi)
+                    INewStr _ vi _    -> (Map.empty, valISet vi)
+                    ICondJmp _ v _ _  -> (valSet v, Set.empty)
+                    ILoad _ vi p      -> (ptrValSet p, valISet vi)
+                    IStore _ v p      -> (valSet v `Map.union` ptrValSet p, Set.empty)
+                    IPhi _ vi phis    -> (phiUseSet phis, valISet vi)
+                    _                 -> (Map.empty, Set.empty)
               in emptyLiveness { liveUse = use, liveKill = kill } <$ instr
 
 -- Propagate current liveness data locally within basic blocks
@@ -77,7 +80,7 @@ globalLiveness cfg_@(CFG g) = linearMap go cfg_
         go node =
             let -- Look at each outgoing edge and get the next uses of all live variables,
                 -- taking the minimum if a variable is used in more than one block.
-                out = foldr (Map.unionWith min . liveIn . nodeLiveness . (g Map.!)) Map.empty (Set.elems $ nodeOut node)
+                out = foldr (Map.unionWith min . liveIn . nodeLiveness . (g OrdMap.!)) Map.empty (OrdSet.elems $ nodeOut node)
                 (lastInstr, instrs) = splitLast $ nodeCode node
                 -- Put the data from the target nodes in the last instruction to be propagated
                 -- during localLiveness step.
@@ -99,7 +102,7 @@ localLiveness node = node {nodeCode = go (nodeCode node)}
                             []  -> liveOut live
                             x:_ -> liveIn $ single x
                         -- in = (out - kill) \cup use
-                        fromOut = (Map.map (first (+1)) out `Map.withoutKeys` liveKill live)
+                        fromOut = Map.filterWithKey (\k _ -> not $ k `Set.member` liveKill live) $ Map.map (first (+1)) out
                         fromThis = Map.map (0,) (liveUse live)
                         in_ = fromThis `Map.union` fromOut
                     in  live {liveOut = out, liveIn = in_})
@@ -117,6 +120,14 @@ valSet v = case v of
 valsSet :: [Val a] -> TypedVarSet
 valsSet = foldr (Map.union . valSet) Map.empty
 
+ptrValSet :: Ptr a -> TypedVarSet
+ptrValSet ptr = case ptr of
+    PArrLen _ v                -> valSet v
+    PElem _ _ v1 v2            -> valsSet [v1, v2]
+    PFld _ _ v _               -> valSet v
+    PLocal {}                  -> Map.empty
+    PParam _ t _ (ValIdent vi) -> Map.singleton vi (() <$ t)
+
 callUseSet :: Call a -> TypedVarSet
 callUseSet call = case call of
     Call _ _ _ vs     -> valsSet vs
@@ -133,6 +144,6 @@ instance Show Liveness where
              ", out = " ++ showMap (liveOut l) ++
              ", use = " ++ showMap (liveUse l) ++
              ", kill = " ++ showSet (liveKill l)
-        where showSet = show . Set.elems
-              showMap :: (Show a, Show b) => Map.Map a b -> String
+        where showSet = show . Set.toList
+              showMap :: (Show a, Show b) => Map.HashMap a b -> String
               showMap = show . Map.toList
