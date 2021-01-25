@@ -28,11 +28,12 @@ import           Syntax.Code
 import           Utilities
 
 data Class a = Class {
-    clName     :: Ident,
-    clBase     :: Maybe (Class a),
-    clFields   :: [Field],
-    clFieldMap :: Map.Map Ident Field,
-    clMethods  :: Map.Map Ident (Method a)
+    clName      :: Ident,
+    clBase      :: Maybe (Class a),
+    clFields    :: [Field],
+    clFieldMap  :: Map.Map Ident Field,
+    clMethods   :: [Method a],
+    clMethodMap :: Map.Map Ident (Method a)
 } deriving Functor
 
 data Field = Fld { fldName :: Ident, fldType :: Type (), fldCode :: ClDef Code}
@@ -59,10 +60,10 @@ mthdTypeIgnSelf (Mthd _ ret _ args _ _) = Fun () ret (map (\(Arg _ t _) -> () <$
 
 -- Phony class serving as a root of the inheritance hierarchy.
 rootCl :: Class a
-rootCl = Class (Ident "~object") Nothing [] Map.empty Map.empty
+rootCl = Class (Ident "~object") Nothing [] Map.empty [] Map.empty
 
 stringCl :: Class a
-stringCl = Class (Ident "string") Nothing [] Map.empty Map.empty
+stringCl = Class (Ident "string") Nothing [] Map.empty [] Map.empty
 
 rootType :: Type ()
 rootType = Cl () (clName rootCl)
@@ -84,7 +85,7 @@ clCons name base flds mthds = do
     let base' = if isNothing base then Just rootCl else Nothing
         fldMap = Map.fromList $ map (\f -> (fldName f, f)) flds
         mthdMap = Map.fromList $ map (\m -> (mthdName m, m)) mthds
-    return $ Class name base' flds fldMap mthdMap
+    return $ Class name base' flds fldMap mthds mthdMap
 
 -- Construct a field from ist constituents.
 fldCons :: Type a -> Ident -> ClDef Code -> Field
@@ -118,40 +119,40 @@ baseMethodCons typ i selfTyp args = do
 -- field and method tables according to inheritance rules.
 clExtend :: Class Code -> Class Code -> Either String (Class Code)
 clExtend cl base = do
-    (flds, fldsMap) <- combinedFlds
-    mthds <- combinedMthds
-    return $ Class (clName cl) (Just base) flds fldsMap mthds
+    (flds, fldsMap)   <- combinedFlds
+    (mthds, mthdsMap) <- combinedMthds
+    return $ Class (clName cl) (Just base) flds fldsMap mthds mthdsMap
     where combinedFlds =
             let fldsMap = clFieldMap base `Map.union` clFieldMap cl
                 flds = clFields base ++ clFields cl
                 (_, dups) = findDupsBy fldName (clFields base ++ clFields cl)
             in  if null dups then Right (flds, fldsMap) else redefFldsError dups
-          combinedMthds =
-            let subMthds = clMethods cl
-            in run (Map.elems $ clMethods base) subMthds
+          combinedMthds = case run (clMethods base) (clMethodMap cl) of
+                            Right mthds -> Right (mthds, Map.fromList $ map (\m -> (mthdName m, m)) mthds)
+                            Left s -> Left s
             where
-                run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String (Map.Map Ident (Method Code))
-                run [] subMthds = return subMthds
+                run :: [Method Code] -> Map.Map Ident (Method Code) -> Either String [Method Code]
+                run [] subMthds = return $ Map.elems subMthds
                 run (b:bs) subMthds =
                     let key = mthdName b
                     in case Map.lookup key subMthds of
-                           Nothing -> Map.insert (mthdName b) b <$> run bs subMthds
+                           Nothing -> (b:) <$> run bs subMthds
                            Just m  -> do
                                let bt = mthdTypeIgnSelf b
                                    mt = mthdTypeIgnSelf m
-                               if bt == mt then Map.insert (mthdName m) m <$> run bs (Map.delete key subMthds)
+                               if bt == mt then (m:) <$> run bs (Map.delete key subMthds)
                                            else redefMthdError b m
 
 -- Mostly used for debugging purposes.
 instance Show (Class a) where
-    show (Class (Ident name) base flds _ mthds) = intercalate "\n" (header : map indent (fields ++ methods))
+    show (Class (Ident name) base flds _ mthds _) = intercalate "\n" (header : map indent (fields ++ methods))
         where
             header = ".class " ++ name ++ extends ++ ":"
             extends = case base of
                 Nothing    -> ""
                 Just clExt -> let Ident x = clName clExt in " extends " ++ x
             fields = ".fields:" : map (indent . show) flds
-            methods = ".methods:" : map (indent . show) (Map.elems mthds)
+            methods = ".methods:" : map (indent . show) mthds
             indent x = "  " ++ x
 
 instance Show (Method a) where

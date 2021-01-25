@@ -34,7 +34,8 @@ size1Opts = foldr optComp optId [
         optInc,
         optDec,
         optZero,
-        optEmptyMov
+        optEmptyMov,
+        optEmptyXchg
     ]
 
 size2Opts :: (String, String) -> Maybe [String]
@@ -178,6 +179,20 @@ optEmptyMov line =
          else Nothing
 
 -- From:
+--   xchgx a, a
+-- To:
+-- _
+optEmptyXchg :: String -> Maybe [String]
+optEmptyXchg line =
+    let pattern_ = [re|xchg[a-z] ([^[:space:]]+), ([^[:space:]]+)|]
+    --                               capt1            capt2
+        m = line ?=~ pattern_
+    in if matched m
+         then let (src, target) = extrMatch2 m
+              in if src == target then Just [] else Nothing
+         else Nothing
+
+-- From:
 --   jmp .L_label
 -- .L_label:
 -- To:
@@ -199,17 +214,17 @@ optJmpToNext (line1, line2) =
 -- From:
 --   setx a
 --   testb a, a
---   jz .L_label
+--   j(z/nz) .L_label
 -- To:
---   j(!x) .L_label
+--   j(!x/x) .L_label
 optCmpJmp :: (String, String, String) -> Maybe [String]
 optCmpJmp (line1, line2, line3) =
     let pattern1 = [re|set([a-z]) ([^[:space:]]+)|]
     --                     capt1      capt2
         pattern2 = [re|testb ([^[:space:]]+), ([^[:space:]]+)|]
     --                           capt1           capt2
-        pattern3 = [re|jz ([^[:space:]]+)|]
-    --                         capt1
+        pattern3 = [re|j(nz|z) ([^[:space:]]+)|]
+    --                   capt1      capt2
         m1 = line1 ?=~ pattern1
         m2 = line2 ?=~ pattern2
         m3 = line3 ?=~ pattern3
@@ -217,9 +232,9 @@ optCmpJmp (line1, line2, line3) =
     if matched m1 && matched m2 && matched m3
       then let (cmp, target1) = extrMatch2 m1
                (target2_1, target2_2) = extrMatch2 m2
-               label = extrMatch m3
+               (jmp, label) = extrMatch2 m3
            in if target1 == target2_1 && target2_1 == target2_2
-                then Just ["  j" ++ negatedCond cmp ++ " " ++ label ++ concatMap matchSuf [m1, m2, m3]]
+                then Just ["  j" ++ (if jmp == "z" then negatedCond cmp else cmp) ++ " " ++ label ++ concatMap matchSuf [m1, m2, m3]]
                 else Nothing
       else Nothing
 

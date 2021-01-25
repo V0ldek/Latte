@@ -1,0 +1,106 @@
+class valuePool {
+    int[] values;
+    int i;
+    
+    void init() {
+        values = new int[20];
+        values[0] = 5;
+        values[1] = 17;
+        values[2] = 6;
+        values[3] = -1;
+        values[4] = 91;
+        values[5] = 31;
+        values[6] = 44;
+        values[7] = 2;
+        values[8] = 19;
+        values[9] = 13;
+        values[10] = 23;
+        values[11] = 17;
+        values[12] = 34;
+        values[13] = 31;
+        values[14] = 44;
+        values[15] = 56;
+        values[16] = 56;
+        values[17] = 14;
+        values[18] = 33;
+        values[19] = -7;
+    }
+
+    int next() {
+        var result = values[i];
+        self.i = (self.i + 1) % values.length;
+        return result;
+    }
+}
+
+class program {
+    valuePool values;
+
+    void run() {
+        values = new valuePool;
+        values.init();
+
+        // These live throughout the entire function.
+        var a = next();
+        var b = next();
+        var c = next();
+        var d = next();
+        var e = next();
+        var f = next();
+
+        var g = a + b;
+        var h = c * d;
+        var i = e / f;
+
+        var am = modify(a);
+        var bm = modify(b);
+        var cm = modify(c);
+        var dm = modify(d);
+        var em = modify(e);
+        var fm = modify(f);
+
+        // g dies here
+        var gm = modify(g);
+        var hm = modify(h);
+        var im = modify(i);
+        var iter = 12;
+
+        while (iter > 0) {
+            hm = modify(hm + next());
+            im = modify(im + am - bm + cm - dm + em - fm);
+            iter = h + iter - 1 - h;
+        }
+
+        printInt(a);
+        printInt(b);
+        printInt(c);
+        printInt(d);
+        printInt(e);
+        printInt(f);
+        printInt(h);
+        printInt(i);
+        printInt(am);
+        printInt(bm);
+        printInt(cm);
+        printInt(dm);
+        printInt(em);
+        printInt(fm);
+        printInt(gm);
+        printInt(hm);
+        printInt(im);
+    }
+
+    int next() {
+        return values.next();
+    }
+
+    int modify(int x) {
+        return 3 * x + 47;
+    }
+}
+
+int main() {
+    var prog = new program;
+    prog.run();
+    return 0;
+}

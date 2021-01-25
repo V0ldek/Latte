@@ -83,7 +83,7 @@ analyseCl cl = do
       when (clName cl /= topLevelClassIdent) (enterCl cl)
       mthds' <- mapM analyseMthd (clMethods cl)
       when (clName cl /= topLevelClassIdent) exitCl
-      let cl' = cl {clBase = base, clMethods = mthds'}
+      let cl' = cl {clBase = base, clMethods = mthds', clMethodMap = Map.fromList $ map (\m -> (mthdName m, m)) mthds'}
       storeClass cl'
       return cl'
 
@@ -116,7 +116,7 @@ analyseBlk blk@(Block _ stmts) = do
 enterCl :: Class a -> AnalyserM ()
 enterCl cl =
   let fldSyms = map (fldToSym SymSelfField) (clFields cl)
-      mthdSyms = map (mthdToSym SymSelfMethod) (Map.elems $ clMethods cl)
+      mthdSyms = map (mthdToSym SymSelfMethod) (clMethods cl)
       selfSym = Sym selfSymIdent (Cl () (clName cl)) Nothing SymNonSelf
    in do
         -- Note that methods are checked for type correctness when they are analysed,
@@ -439,7 +439,7 @@ isTriviallyFalse expr = case expr of
 topLevelSymTab :: Metadata a -> SymbolTable
 topLevelSymTab (Meta cls) =
   let topLevelCl = cls Map.! topLevelClassIdent
-      topLevelSyms = map (mthdToSym SymNonSelf) (Map.elems $ clMethods topLevelCl) ++ nativeTopLevelSymbols
+      topLevelSyms = map (mthdToSym SymNonSelf) (clMethods topLevelCl) ++ nativeTopLevelSymbols
    in SymTab (Map.fromList $ map (\s -> (symName s, s)) topLevelSyms) Nothing
 
 -- Annotate the piece of syntax with semantic data according to current state and a Void type.

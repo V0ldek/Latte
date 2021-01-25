@@ -1,9 +1,6 @@
 module X86_64.Registers where
 
-import qualified Data.Map            as Map
-import           Espresso.Syntax.Abs
-
-data RegType = CallerSaved | CalleeSaved deriving Eq
+data RegType = CallerSaved | CalleeSaved deriving (Eq, Show)
 data Reg = Reg {
     -- Identifier for the 64 bits of the register.
     reg64   :: String,
@@ -16,28 +13,6 @@ data Reg = Reg {
     -- Whether the register is caller or callee saved.
     regType :: RegType
 }
-
-data RegState = RegS {
-    reg         :: Reg,
-    -- Whether the register is reserved for some operation and cannot be modified.
-    regReserved :: Bool,
-    -- Values currently residing in the register.
-    regVals     :: [ValIdent]
-} deriving Show
-
--- Register rank for the purposes of spilling.
-data RegRank =
-    -- Currently free
-    Free RegType |
-    -- The contained values are all saved in memory.
-    -- The integer value is the distance to the next use
-    -- of a value inside.
-    Clean Int |
-    -- The contained values are not saved in memory.
-    -- The integer value is the distance to the next use
-    -- of a value inside.
-    Dirty Int
-    deriving Eq
 
 instance Show Reg where
     show = reg64
@@ -56,52 +31,8 @@ instance Ord RegType where
         (CalleeSaved, CallerSaved) -> LT
         (CallerSaved, CalleeSaved) -> GT
 
--- When choosing a register to put a value in prefer free
--- registers.
--- Otherwise, when choosing a register to spill:
--- - Choose a register holding a value whose use lies farthest in the future;
--- - prefer clean values to dirty values;
--- - if no clean value, chooese a dirty one.
-instance Ord RegRank where
-    compare r1 r2 = case (r1, r2) of
-        (Free rt1, Free rt2)   -> compare rt1 rt2
-        (Clean n1, Clean n2)   -> compare n2 n1
-        (Dirty n1, Dirty n2)   -> compare n2 n1
-        (Free CalleeSaved, _)  -> LT
-        (_, Free CalleeSaved ) -> GT
-        (Free CallerSaved, _)  -> LT
-        (_, Free CallerSaved ) -> GT
-        (Clean c, Dirty d)     -> if d < c then GT else LT
-        (Dirty d, Clean c)     -> if d < c then LT else GT
-
--- Default state at start of execution for general purpose registers.
-emptyState :: Reg -> RegState
-emptyState r = RegS r False []
-
--- Default state at start of execution for special registers (rsp, rbp).
-reservedState :: Reg -> RegState
-reservedState r = RegS r True []
-
--- All registers and their states for x86_64.
-initialRegs :: Map.Map Reg RegState
-initialRegs = Map.fromList [
-        (rax, emptyState rax),
-        (rdx, emptyState rdx),
-        (rbx, emptyState rbx),
-        (rcx, emptyState rcx),
-        (rsi, emptyState rsi),
-        (rdi, emptyState rdi),
-        (rsp, reservedState rsp),
-        (rbp, reservedState rbp),
-        (r8, emptyState r8),
-        (r9, emptyState r9),
-        (r10, emptyState r10),
-        (r11, emptyState r11),
-        (r12, emptyState r12),
-        (r13, emptyState r13),
-        (r14, emptyState r14),
-        (r15, emptyState r15)
-    ]
+allRegs :: [Reg]
+allRegs = [rax, rdx, rbx, rcx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15]
 
 rax :: Reg
 rax = Reg "rax" "eax" "ax" "al" CallerSaved

@@ -16,7 +16,7 @@ inlineTrivialBlocks = fixpointBy (\(CFG g) -> Map.keys g) collapseOnce
 
 removeUnreachable :: CFG () -> Method () -> (CFG (), Method ())
 removeUnreachable cfg_ (Mthd _ t qi ps _) =
-    let mthd = Mthd () t qi ps (linearize cfg_)
+    let mthd = Mthd () t qi ps (linearise cfg_)
     in  (cfg mthd, mthd)
 
 collapseOnce :: CFG () -> CFG ()
@@ -42,9 +42,3 @@ inlineInto u v =
     let vInstrs = filter (\i -> i /= IJmp () (nodeLabel u)) (nodeCode v)
         uInstrs = dropWhile isLabel (nodeCode u)
     in v {nodeCode = vInstrs ++ uInstrs, nodeOut = nodeOut u}
-
-isLabel :: Instr a -> Bool
-isLabel instr = case instr of
-  ILabel {}    -> True
-  ILabelAnn {} -> True
-  _            -> False

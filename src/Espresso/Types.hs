@@ -59,3 +59,11 @@ valType val = case val of
     VFalse a    -> Bool a
     VNull a t   -> Ref a t
     VVal _ t _  -> t
+
+ptrType :: Ptr a -> SType a
+ptrType ptr = case ptr of
+    PArrLen a _    -> Int a
+    PElem _ t _ _  -> t
+    PFld _ t _ _   -> t
+    PParam _ t _ _ -> t
+    PLocal _ t _   -> t

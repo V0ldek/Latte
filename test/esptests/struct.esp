@@ -23,15 +23,14 @@
 .method int ~cl_TopLevel.main(): [
 .L_entry:
   %v_s := new box;
-  %v_fld := fldptr box& %v_s box.value;
 
-  %v_val := load int& %v_fld;
+  %v_val := load int& fldptr box& %v_s box.value;
   call void ~cl_TopLevel.printInt (int %v_val);
 
   %v_val2 := int %v_val + 1;
-  store int %v_val2 int& %v_fld;
+  store int %v_val2 into int& fldptr box& %v_s box.value;
   
-  %v_val3 := load int& %v_fld;
+  %v_val3 := load int& fldptr box& %v_s box.value;
   call void ~cl_TopLevel.printInt (int %v_val3);
   
   return 0;

@@ -1,7 +1,6 @@
 module Espresso.CodeGen.Generator (generateEspresso) where
 
 import           Control.Monad.Reader
-import           Data.List                  (foldl')
 import qualified Data.Map                   as Map
 import           Data.Maybe                 (fromJust)
 import           Espresso.CodeGen.GenM
@@ -23,14 +22,14 @@ generateEspresso :: TopLevel.Metadata SemData -> Program ()
 generateEspresso m@(TopLevel.Meta meta) =
     let cls = Map.elems meta
         preamble = Espresso.Meta () $ map genClDef cls
-        code = map (genMthd m) $ dedupBy mthdQIdent $ concatMap (Map.elems . clMethods) cls
+        code = map (genMthd m) $ dedupBy mthdQIdent $ concatMap clMethods cls
     in  Program () preamble code
 
 -- Generate an Espresso .class definition for a semantically analysed Latte class.
 genClDef :: Class.Class SemData -> Espresso.ClassDef ()
 genClDef cl = ClDef () (toSymIdent $ clName cl)
                 (map emitFldDef $ clFields cl)
-                (map emitMthdDef $ Map.elems $ clMethods cl)
+                (map emitMthdDef $ clMethods cl)
     where
         emitFldDef fld = FldDef () (toSType $ fldType fld) (toSymIdent $ fldName fld)
         emitMthdDef mthd = MthdDef () (toFType $ mthdType mthd) (mthdQIdent mthd)
@@ -48,6 +47,7 @@ genMthd meta mthd =
             let Latte.Block _ stmts = mthdBlk mthd
                 argDecls = declArgs actualArgs
             emit $ mbAnnLabel entryLabel (codeLines (mthdBlk mthd))
+            forM_ (zip argDecls [0..]) (\((_, val), i) -> emit $ ILoad () (valName val) (PParam () (Ref () $ valType_ val) i (valName val)))
             localSyms argDecls $ genStmts stmts
             code <- getCode
             if mthdRet mthd == Latte.Void ()
@@ -73,11 +73,11 @@ genStmts (stmt : stmts) = case stmt of
         decls <- genItems syms items
         localSyms decls (genStmts stmts)
     Latte.Ass _ e1 e2 -> do
-        (lvalue, type_) <- genLValue e1
+        lvalue <- genLValue e1
         rvalue <- genExpr e2
-        case type_ of
-            VLocal    -> emit $ ISet () (valName lvalue) rvalue
-            VIndirect -> emit $ IStore () rvalue (toVVal lvalue)
+        case lvalue of
+            VLocal val    -> emit $ ISet () (valName val) rvalue
+            VIndirect ptr -> emit $ IStore () rvalue (ptrVal ptr)
         genStmts stmts
     Latte.Incr {}     -> error "Incr should be rewritten"
     Latte.Decr {}     -> error "Decr should be rewritten"
@@ -207,7 +207,7 @@ genExpr expr = case expr of
     -- so that assembly codegen can emit an allocation from a string constant.
     Latte.EString _ s     -> do
         newval <- freshVal
-        emit $ IStr () newval s
+        emit $ INewStr () newval s
         return $ VVal () (Ref () $ strType) newval
     Latte.ELitTrue _      -> return $ VTrue ()
     Latte.ELitFalse _     -> return $ VFalse ()
@@ -236,20 +236,16 @@ genExpr expr = case expr of
         return (VVal () (toSType t) newval)
     Latte.EIdx _ arrExpr idxExpr -> do
         objPtr <- genArrAcc arrExpr idxExpr
-        let t = deref $ valType_ objPtr
+        let t = deref $ ptrType_ objPtr
         newval <- freshVal
-        emit $ ILoad () newval (toVVal objPtr)
+        emit $ ILoad () newval (ptrVal objPtr)
         return (VVal () t newval)
     Latte.EAcc _ e fldIdent -> do
         fldPtr <- genFldAcc e fldIdent
-        let t = deref $ valType_ fldPtr
-        if isRef $ valType_ fldPtr
-          then do
-            newval <- freshVal
-            emit $ ILoad () newval (toVVal fldPtr)
-            return (VVal () t newval)
-          else
-            return $ toVVal fldPtr
+        let t = deref $ ptrType_ fldPtr
+        newval <- freshVal
+        emit $ ILoad () newval (ptrVal fldPtr)
+        return (VVal () t newval)
     Latte.ENeg _ e          -> genUnOp e (UnOpNeg ())
     Latte.ENot _ e          -> genUnOp e (UnOpNot ())
     Latte.EMul _ e1 op e2   -> genOp e1 e2 (toEspressoMulOp op)
@@ -343,7 +339,10 @@ genCond e ltrue lfalse = case e of
         genCond e2 ltrue lfalse
     _ -> do
         val <- genExpr e
-        emit $ ICondJmp () val ltrue lfalse
+        case val of
+            VTrue _  -> emit $ IJmp () ltrue
+            VFalse _ -> emit $ IJmp () lfalse
+            _        -> emit $ ICondJmp () val ltrue lfalse
 
 -- Generate code for the given unary operator applied to an expression.
 genUnOp :: Latte.Expr SemData -> UnOp () -> GenM (Val ())
@@ -388,8 +387,7 @@ unifyVRet instrs =
         retToJmp instr      = instr
 
 -- Create a special .L_exit label signifying the end of the method
--- and turn all returns to jumps to that label. The return value
--- is propagated to a phi instruction at the start of .L_exit.
+-- and turn all returns to jumps to that label.
 -- Additionally add a jump at the end of the initial instruction sequence.
 -- There are no implicit returns in this case, but there might be an empty,
 -- unreachable label. For example, when we had an if-else instruction in
@@ -399,40 +397,33 @@ unifyVRet instrs =
 -- we need this artificial jump.
 unifyRet :: Latte.Type () -> [Instr ()] -> GenM [Instr ()]
 unifyRet t instrs = do
-    let (phi, _) = foldl' (flip goPhis) ([], entryLabel) instrs
-        instrs' = map retToJmp instrs
-    val <- valIdentFor (Latte.Ident "ret")
+    vi <- valIdentFor (Latte.Ident "ret")
+    let instrs' = concatMap (retToJmp vi) instrs
     return $ instrs' ++ [
             IJmp () exitLabel,
             ILabel () exitLabel,
-            IPhi () val phi,
-            IRet () (VVal () (toSType t) val)
+            IRet () (VVal () (toSType t) vi)
         ]
     where
-        goPhis (ILabel _ l) (phi, _)        = (phi, l)
-        goPhis (ILabelAnn _ l _ _) (phi, _) = (phi, l)
-        goPhis (IRet _ v) (phi, l)          = (PhiVar () l v:phi, l)
-        goPhis _ x                          = x
-        retToJmp IRet {} = IJmp () exitLabel
-        retToJmp i       = i
+        retToJmp retvi (IRet _ val) = [
+                ISet () retvi val,
+                IJmp () exitLabel
+            ]
+        retToJmp _ i = [i]
 
-data ValType = VLocal | VIndirect
+data LVal = VLocal EspVal | VIndirect EspPtr
 
-genLValue :: Latte.Expr SemData -> GenM (EspVal, ValType)
+genLValue :: Latte.Expr SemData -> GenM LVal
 genLValue e = case e of
     Latte.EVar _ i -> do
         val <- askSym i
-        return (val, VLocal)
-    Latte.EIdx _ arrExpr idxExpr -> do
-        arrptr <- genArrAcc arrExpr idxExpr
-        return (arrptr, VIndirect)
-    Latte.EAcc _ objExpr fldIdent -> do
-        fld <- genFldAcc objExpr fldIdent
-        return (fld, VIndirect)
+        return $ VLocal val
+    Latte.EIdx _ arrExpr idxExpr -> VIndirect <$> genArrAcc arrExpr idxExpr
+    Latte.EAcc _ objExpr fldIdent -> VIndirect <$> genFldAcc objExpr fldIdent
     _ -> error $ "internal error, invalid lvalue " ++ show (() <$ e)
 
 -- Generate a field access on the value of the given expression.
-genFldAcc :: Latte.Expr SemData -> Latte.Ident -> GenM EspVal
+genFldAcc :: Latte.Expr SemData -> Latte.Ident -> GenM EspPtr
 genFldAcc e i = do
     obj <- genExpr e
     let t = valType obj
@@ -441,30 +432,27 @@ genFldAcc e i = do
             cl <- askClass clIdent
             case Map.lookup i (clFieldMap cl) of
                 Just fld -> do
-                    newval <- freshVal
-                    emit $ IFld () newval obj (QIdent () clIdent (toSymIdent $ fldName fld))
-                    return $ EspVal newval (Ref () $ toSType $ fldType fld)
+                    let t' = Ref () $ toSType $ fldType fld
+                        qi = QIdent () clIdent (toSymIdent $ fldName fld)
+                    return $ EspPtr (PFld () t' obj qi) t'
                 Nothing -> error $ "internal error. invalid field " ++ toStr i ++ " for type " ++ toStr clIdent
         Arr {} -> case i of
-            Latte.Ident "length" -> do
-                newval <- freshVal
-                emit $ IArrLen () newval obj
-                return $ EspVal newval (Int ())
+            Latte.Ident "length" -> return $ EspPtr (PArrLen () obj) (Int ())
             _ -> error $ "internal error. invalid array field access " ++ toStr i
         _ -> error $ "internal error. invalid type in fldAcc " ++ show t
 
-genArrAcc :: Latte.Expr SemData -> Latte.Expr SemData -> GenM EspVal
+-- Generate an array access.
+genArrAcc :: Latte.Expr SemData -> Latte.Expr SemData -> GenM EspPtr
 genArrAcc arrExpr idxExpr = do
     arrObj <- genExpr arrExpr
     idxObj <- genExpr idxExpr
     let t = valType arrObj
     case deref t of
-        Arr _ elemT -> do
-            newval <- freshVal
-            emit $ IArr () newval arrObj idxObj
-            return $ EspVal newval (Ref () elemT)
+        Arr _ elemT -> return $ EspPtr (PElem () elemT arrObj idxObj) (Ref () elemT)
         _ -> error $ "internal error. invalid type in arrAcc " ++ show t
 
+-- Generate a call function deciding whether thge call should be static
+-- or virtual.
 type CallInstr = SType () -> QIdent () -> [Val ()] -> Call ()
 genFun :: Latte.Expr SemData -> GenM (QIdent (), CallInstr)
 genFun e = case e of
@@ -475,7 +463,7 @@ genFun e = case e of
         case deref t of
             Cl _ clIdent -> do
                 cl <- askClass clIdent
-                case Map.lookup i (clMethods cl) of
+                case Map.lookup i (clMethodMap cl) of
                     Just mthd -> do
                         let call ct cqi cvs = CallVirt () ct cqi (obj:cvs)
                         return (QIdent () clIdent (SymIdent $ toStr $ mthdName mthd), call)

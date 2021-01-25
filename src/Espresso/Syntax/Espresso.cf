@@ -1,7 +1,7 @@
 entrypoints Program ;
 
--- Override Ident definition to allow leading '~' for internal names.
-token SymIdent (letter | '~') (letter | digit | '_' | '\'')* ;
+-- Override Ident definition to allow '~' for internal names.
+token SymIdent (letter | '~') (letter | digit | '_' | '~' | '\'')* ;
 
 token LabIdent '.' 'L' '_' (letter | digit | '_' | '\'')* ;
 
@@ -43,25 +43,30 @@ separator Param "," ;
 separator Method "" ;
 
 ILabel.    Instr ::= LabIdent ":" ;
-ILabelAnn. Instr ::= LabIdent ":" "(" "lines" Integer "to" Integer ")" ;
+ILabelAnn. Instr ::= LabIdent ":" "(" "lines" Integer "to" Integer ")" ; 
 IVRet.     Instr ::= "return" ";" ;
 IRet.      Instr ::= "return" Val ";" ;
 IOp.       Instr ::= ValIdent ":=" Val Op Val ";" ;
 ISet.      Instr ::= ValIdent ":=" Val ";" ;
-IStr.      Instr ::= ValIdent ":=" String ";" ;
+ISwap.     Instr ::= "swap" SType ValIdent ValIdent ";" ;
 IUnOp.     Instr ::= ValIdent ":=" UnOp Val ";" ;
 IVCall.    Instr ::= Call ";" ;
 ICall.     Instr ::= ValIdent ":=" Call ";" ;
 INew.      Instr ::= ValIdent ":=" "new" SType ";" ;
 INewArr.   Instr ::= ValIdent ":=" "newarr" SType "[" Val "]" ";" ;
+INewStr.   Instr ::= ValIdent ":=" "newstr" String ";" ;
 IJmp.      Instr ::= "jump" LabIdent ";" ;
 ICondJmp.  Instr ::= "jump" "if" Val "then" LabIdent "else" LabIdent ";" ;
-ILoad.     Instr ::= ValIdent ":=" "load" Val ";" ;
-IStore.    Instr ::= "store" Val Val ";" ;
-IFld.      Instr ::= ValIdent ":=" "fldptr" Val QIdent ";" ;
-IArr.      Instr ::= ValIdent ":=" "elemptr" Val "[" Val "]" ";" ;
-IArrLen.   Instr ::= ValIdent ":=" "arrlen" Val ";" ;
+ILoad.     Instr ::= ValIdent ":=" "load" Ptr ";" ;
+IStore.    Instr ::= "store" Val "into" Ptr ";" ;
 IPhi.      Instr ::= ValIdent ":=" "phi" "(" [PhiVariant] ")" ";" ;
+IEndPhi.   Instr ::= "endphi" ";" ;
+
+PFld.    Ptr ::= SType "fldptr" Val QIdent ;
+PElem.   Ptr ::= SType "elemptr" Val "[" Val "]" ;
+PArrLen. Ptr ::= "arrlen" Val ;
+PLocal.  Ptr ::= SType "local" Integer ;
+PParam.  Ptr ::= SType "param" Integer ValIdent ;
 
 PhiVar. PhiVariant ::= LabIdent ":" Val ;
 

@@ -1,4 +1,4 @@
-# Latte v0.10.0
+# Latte v1.0.0
 
 Compiler of the [Latte programming language](https://www.mimuw.edu.pl/~ben/Zajecia/Mrj2020/Latte/description.html) written in Haskell.
 
@@ -24,10 +24,15 @@ When running on a file `<p>.lat`, where `<p> = <dir_path/<file_path>` is some pa
 2. when `-g` is specified the following intermediate representations are generated additionally:
 
 - `<p>.esp`, `<p>.cfg` - Espresso intermediate code and text representation of its Control Flow Graph.
-- `<p>.1.lin.esp`                  - Espresso with unreachable blocks removed.
-- `<p>.2.opt.esp`, `<p>.2.opt.cfg` - Optimised Espresso code and its CFG.
-- `<p>.3.phi.esp`, `<p>.3.phi.cfg` - Optimised Espresso code with unfolded phony `phi` function usage and its CFG.
-- `<p>.4.liv.esp`, `<p>.4.liv.cfg` - Same code as above but with liveness annotations in form of comments on every instruction and the CFG with liveness annotations for the begin and end of each node.
+- `<p>.1.reach.esp`, `<p>.1.reach.cfg` - Espresso with unreachable blocks removed.
+- `<p>.2.liv.esp`, `<p>.2.liv.cfg` - Espresso with initial liveness analysis.
+- `<p>.3.ssa.esp`, `<p>.3.ssa.cfg` - Espresso converted to SSA form.
+- `<p>.4.opt.esp`, `<p>.4.opt.cfg` - Espresso with optimisations applied.
+- `<p>.5.liv.esp`, `<p>.5.liv.cfg` - Livenness analysis after optimisation.
+- `<p>.6.regs.esp`, `<p>.6.regs.cfg`, `<p>.6.regs.ig` - Espresso after global register allocation with spilling code inserted. The `ig` file contains the generated interference graphs for all methods.
+- `<p>.7.nophi.esp`, `<p>.7.nophi.cfg` - Espresso with phony `phi` functions eliminated.
+- `<p>.8.opt.esp`, `<p>.8.opt.cfg` - Espresso after final optimisation pass.
+- `<p>.9.final.esp`, `<p>.9.final.cfg` - Final version of Espresso used for codegen including final liveness analysis pass.
 - `<p>.noopt.s` - Generated assembly before peephole optimisation phase.
 
 ## Testing the project
@@ -49,75 +54,15 @@ These are quick to run but do not test anything related to x86_64 assembly gener
 - Full semantic analysis with type checks and reachability analysis.
 - Internal IR language - Espresso - with a separate lexer/parser and a small interpreter.
 - Compilation to Espresso and generation of additional annotations - Control Flow Graph and variable liveness analysis.
-- x86_64 assembly code generation with register handling done locally via register/variable descriptions.
 - Support for arrays of integers, booleans or references to objects.
 - Support for objects with single inheritance and virtual methods.
+- SSA transformation.
+- Constant and copy propagation.
+- Global Common Subexpression Elimination.
+- Global register allocation based on interference graph colouring for chordal graphs.
+- Spill code handled with simple cost heuristic.
+- x86_64 assembly code generation.
 - Peephole optimisations of the generated assembly to fix common trivial inefficiencies.
-
-## Known issues
-
-1. The generated code is wasteful when it comes to string literals. For example the code:
-
-```
-string x = "foo";
-string y = "bar";
-string z = x + y;
-printString(z);
-```
-
-causes three string allocations for each of the variables `x`, `y`, `z`. This is planned to change in the final version where constant propagation will be implemented.
-
-2. There is a slight issue with string allocation. Codegen for a string literal:
-```
-// Espresso code
-%v_0 := "literal";
-call void foo(string& %v_0);
-```
-
-looks like this:
-
-```as
-__const_1:
-  .string "literal"
-
-...
-
-lea __const_1(%rip), %r10
-movq %r10, %rdi # moving %v_0
-movl $7, %esi
-movq %r10, %r12 # moving %v_0 <---
-call lat_new_string
-movq %rax, %rdi # moving %v_0
-call __cl_TopLevel.foo
-```
-the indicated `mov` instruction is redundant. The compiler sees that %v_0 is alive after the `IStr` instruction (namely used in the call to `foo`) so it tries to preserve it through the call to `lat_new_string` (since `%r10` is caller-saved). This is wasteful, since the value inside `%r10` at that point is the address of the string literal constant, but the logical value of `%v_0` is the result of the call to `lat_new_string`. Fixing this is nontrivial, so it will be done if time permits for the next version.
-
-3. Conditional jumps where locals have to be persisted between blocks result in inefficient codegen. For example, the way a `<=` conditional is generated in Espresso is:
-
-```
-%v_cond := %v_0 <= %v_1;
-jump if %v_cond then .L_then else .L_else;
-```
-Assume only %v_0 is alive at the end of this block. These two instructions are independently translated. First, the boolean value is created (assume `%v_0` in `%eax` and `%v_1` in `%edx`):
-```
-cmpl %eax, %edx
-setle %dl
-```
-Then the conditional jump:
-```
-testb %dl, %dl
-movl %eax, 8(%rbp) # save %v_0 on the stack
-jz .L_else
-jmp .L_then
-```
-But clearly this can be more efficiently realised with:
-```
-cmpl %eax, %edx
-movl %eax, 8(%rbp) # save %v_0 on the stack
-jg .L_else
-jmp .L_then
-```
-Some of these are fixed by peephole optimisations, but that approach fails when there are the save-on-stack `mov`s in between the `set`-`test`-`jz` sequence. This is non-trivial to fix, so it will be done in the next version of the compiler.
 
 ## Custom extensions
 
@@ -216,25 +161,50 @@ The modules in `Espresso.CodeGen` process the Latte code with annotations from s
 
 A program in Espresso starts with a `.metadata` table that contains type information about all classes and functions defined in the Latte code, plus runtime functions. Then a sequence of `.method` definitions follows as a sequence of quadruples including labels, jumps and operations. For a detailed scription of the instruction set refer to the grammar file.
 
-The instruction set includes the phony function `phi` akin to LLVM's `phi`. It sets a value based on the label from which a jump was performed. The code generated by `Espresso.CodeGen` _is not_ in SSA form, but it uses `phi` for setting the return value of a method.
-
 Code generation ensures that there is no fall-through between labels, each basic block ends with a conditional or unconditional jump. Therefore, the blocks can be reordered arbitrarily.
 
 ### Phase five - Espresso analysis
 
-The generated code needs additional annotations, mainly liveness information for all values and instructions. These are done by modules in `Espresso.ControlFlow`. First the code is divided into basic blocks and a Control Flow Graph is constructed. Then the phony function usage is unfolded, since it is untranslateable into assembly directly. Then liveness analysis is performed on the new CFG graph.
+The generated code needs additional annotations, mainly liveness information for all values and instructions. These are done by modules in `Espresso.ControlFlow`. First the code is divided into basic blocks and a Control Flow Graph is constructed, with blocks unreachable from `.L_entry` removed. Then global liveness analysis is performed.
 
-This phase will also contain optimisation steps in the future version of the compiler.
+### Phase six - SSA translation
 
-### Phase six - x86_64 assembly codegen
+The generated code needs to be translated to Single Static Assignment form to facilitate optimisations and register allocation. The algorithm is simple, inserting phony phi functions at the start of each basic block and then removing the unneeded ones.
 
-Assembly generations proceeds by simulating the state of the target machine with register/value descriptions. Locals are persisted on the stack between basic blocks, while registers are greedily allocated within the block based on variable next use data computed in the previous phase. This phase leaves a lot of garbage code, like empty `addq $0, %rsp` instructions, but these are easily cleared in the next phase.
+### Phase seven - optimisation pipeline.
 
-### Phase seven - peephole optimisations
+The SSA code is then optimised, performing the following steps:
+
+- Liveness is reanalysed on the SSA graph.
+- Dead code (assignments to dead values and unreachable instructions) is removed.
+- Global Common Subexpression Elimination is performed.
+- Constants and copies are propagated.
+
+These steps preserve SSA form and are applied continously until reaching a fixpoint where no new optimisations are possible.
+
+### Phase eight - global register allocation
+
+Values in the optimised SSA Espresso code are assigned registers. First, an interference graph is constructed. The resulting graph is chordal and thus can be coloured efficiently with greedy colouring after computing the perfect elimination ordering using a lexicographical BFS.
+
+If the graph cannot be coloured for x86_64 14 general-purpose register set (`%rsp` and `%rbp` excluded), spill code is inserted similar to the original spill code step of register allocation by Chaitin et al.
+
+### Phase nine - `phi` elimination
+
+Phony `phi` functions must be eliminnated before assembly codegen, but without creating new values since registers are already allocated. The algorithm inserts sequences of swaps, sets, stores and loads in blocks preceeding a block with a `phi` function that ensures correct placement of values in target registers.
+
+### Phase ten - block contraction
+
+The previous step generates blocks that can be easily optimised to avoid a few jumps. Namely, if the CFG contains edges `v -> u` such that `u` is the only successor of `v` and `v` is the only predecessor of `u`, the edge can be collapsed an the two blocks merged into one, since the jump between them always happens.
+
+### Phase eleven - x86_64 assembly codegen
+
+Assembly generation proceeds using the computed register allocation.
+
+### Phase twelve - peephole optimisations
 
 The result code is analysed by matching a number of patterns of common unoptimal code and fixing them locally. The process is repeated until a fixpoint is reached, i.e. no more optimisations are applicable.
 
-### Phase eight - assembly and linking
+### Phase thirteen - assembly and linking
 
 As the final phase, `gcc` is used to compile the generated assembly and link it with the runtime.
 
@@ -271,3 +241,4 @@ is ambiguous between `IUnOp` on `42` or `ISet` on `-42`. This is inconsequential
 A few parts of the code were directly copied or heavily inspired by my earlier work on the Harper language (https://github.com/V0ldek/Harper), most notably the control flow analysis monoid based approach.
 
 The grammar rules for `null` literals are a slightly modified version of rules proposed by Krzysztof Małysa.
+
